@@ -88,6 +88,7 @@ func (s *Server) GetBillingStatus(
 	// dashboard renders and a call that would fail cannot drift apart.
 	resp.Purchasable = proto.Bool(s.subscriptions.Purchasable(rec))
 	resp.Manageable = proto.Bool(s.subscriptions.Manageable(ctx, orgID))
+	resp.CurrentPeriodStart = timestamp(ent.SubPeriodStart)
 	resp.CurrentPeriodEnd = timestamp(ent.SubPeriodEnd)
 	resp.GracePeriodEndsAt = timestamp(ent.SubGracePeriodEndsAt)
 	resp.ContractEndsAt = timestamp(ent.ContractEndsAt)

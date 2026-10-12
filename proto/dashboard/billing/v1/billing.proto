@@ -122,6 +122,12 @@ message GetBillingStatusResponse {
   // When the provider bills next: the MONEY's period, not the usage period above.
   // Absent when there is no live subscription.
   google.protobuf.Timestamp current_period_end = 10;
+  // When the provider's current billing period began, the start of the period
+  // current_period_end closes. Absent when there is no live subscription or the
+  // provider sent no start. The meter counts the period in whole UTC days, from
+  // this instant's day up to, not including, current_period_end's, except that
+  // after a change of subscription it skips the days the previous one counted.
+  google.protobuf.Timestamp current_period_start = 17;
   // When the provider stops waiting for the failed card -- the banner's "update
   // your card by". Past it the provider holds the subscription (still PAST_DUE,
   // this field then absent) or cancels it, and this can read as past until pug sees
