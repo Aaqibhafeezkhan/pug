@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/log/global"
 	lognoop "go.opentelemetry.io/otel/log/noop"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
@@ -52,7 +51,7 @@ func doSetupWithoutExport(ctx context.Context) func(context.Context) error {
 	otel.SetTextMapPropagator(newPropagator())
 	otel.SetTracerProvider(tracenoop.NewTracerProvider())
 	otel.SetMeterProvider(metricnoop.NewMeterProvider())
-	global.SetLoggerProvider(lognoop.NewLoggerProvider())
+	otel.SetLoggerProvider(lognoop.NewLoggerProvider())
 
 	installStdoutLogHandler()
 	slog.InfoContext(ctx, "no OTLP endpoint configured; application logs on stdout (OTLP export off)")
