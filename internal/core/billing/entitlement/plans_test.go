@@ -8,8 +8,7 @@ import (
 )
 
 // A sold plan's numbers must match the meters on its provider product, and an edit
-// re-splits every subscription on it silently. The values are PLACEHOLDERS until
-// the commercial split is decided — then this pin is what makes changing them a
+// re-splits every subscription on it silently, so this pin makes changing them a
 // deliberate act.
 func TestCatalogIsPinned(t *testing.T) {
 	want := map[string]struct {

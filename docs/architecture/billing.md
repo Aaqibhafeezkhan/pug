@@ -98,10 +98,8 @@ for the layout a subscription on a catalog slug is split by. A deal's layout is
 |---|---|---|---|---|
 | `usage-2026-10` | Pay as you go | 100,000 | 2M · 15M · 50M · 100M · 250M · unbounded | 365 days |
 
-**The numbers are placeholders.** The commercial split is not decided. Each number
-is a named constant in `plans.go`, so setting it is a one-line change there, the
-matching meters on the provider's product, and `TestCatalogIsPinned`'s
-expectation.
+`TestCatalogIsPinned` pins these numbers. Once any org holds the plan they never
+change in place (§4.2).
 
 - **A plan is quantities, never money.** `FreeEvents` is the allowance: never
   reported to the provider, so never billed. `TierUpTo` splits the rest — tier k
