@@ -34,7 +34,7 @@ func (q *Queries) CreateOrphanProjectDeletion(ctx context.Context, arg CreateOrp
 const createProject = `-- name: CreateProject :one
 insert into projects (display_name, id, org_id, reporting_timezone)
 values ($1, $2, $3, $4)
-returning create_time, display_name, fcm_service_json, id, org_id, reporting_timezone, update_time, deletion_time
+returning create_time, display_name, fcm_service_json, id, org_id, reporting_timezone, update_time, deletion_time, default_theme
 `
 
 type CreateProjectParams struct {
@@ -65,6 +65,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.ReportingTimezone,
 		&i.UpdateTime,
 		&i.DeletionTime,
+		&i.DefaultTheme,
 	)
 	return i, err
 }
@@ -77,7 +78,7 @@ with check_admin as (
 insert into projects (display_name, id, org_id, reporting_timezone)
 select $1, $2, $3, $4
 where exists (select 1 from check_admin)
-returning create_time, display_name, fcm_service_json, id, org_id, reporting_timezone, update_time, deletion_time
+returning create_time, display_name, fcm_service_json, id, org_id, reporting_timezone, update_time, deletion_time, default_theme
 `
 
 type CreateProjectAsAdminParams struct {
@@ -109,6 +110,7 @@ func (q *Queries) CreateProjectAsAdmin(ctx context.Context, arg CreateProjectAsA
 		&i.ReportingTimezone,
 		&i.UpdateTime,
 		&i.DeletionTime,
+		&i.DefaultTheme,
 	)
 	return i, err
 }
@@ -178,7 +180,7 @@ func (q *Queries) DeleteDashboardSharesByProjectID(ctx context.Context, projectI
 }
 
 const getAnyProjectByIDForUpdate = `-- name: GetAnyProjectByIDForUpdate :one
-select create_time, display_name, fcm_service_json, id, org_id, reporting_timezone, update_time, deletion_time from projects
+select create_time, display_name, fcm_service_json, id, org_id, reporting_timezone, update_time, deletion_time, default_theme from projects
 where id = $1
 for update
 `
@@ -196,12 +198,13 @@ func (q *Queries) GetAnyProjectByIDForUpdate(ctx context.Context, id string) (Pr
 		&i.ReportingTimezone,
 		&i.UpdateTime,
 		&i.DeletionTime,
+		&i.DefaultTheme,
 	)
 	return i, err
 }
 
 const getProjectByIDForUpdate = `-- name: GetProjectByIDForUpdate :one
-select create_time, display_name, fcm_service_json, id, org_id, reporting_timezone, update_time, deletion_time from projects
+select create_time, display_name, fcm_service_json, id, org_id, reporting_timezone, update_time, deletion_time, default_theme from projects
 where org_id = $1 and id = $2 and deletion_time is null
 for update
 `
@@ -225,6 +228,7 @@ func (q *Queries) GetProjectByIDForUpdate(ctx context.Context, arg GetProjectByI
 		&i.ReportingTimezone,
 		&i.UpdateTime,
 		&i.DeletionTime,
+		&i.DefaultTheme,
 	)
 	return i, err
 }
@@ -244,7 +248,7 @@ const updateFCMServiceJSON = `-- name: UpdateFCMServiceJSON :one
 update projects
 set fcm_service_json = $1
 where org_id = $2 and id = $3 and deletion_time is null
-returning create_time, display_name, fcm_service_json, id, org_id, reporting_timezone, update_time, deletion_time
+returning create_time, display_name, fcm_service_json, id, org_id, reporting_timezone, update_time, deletion_time, default_theme
 `
 
 type UpdateFCMServiceJSONParams struct {
@@ -265,6 +269,7 @@ func (q *Queries) UpdateFCMServiceJSON(ctx context.Context, arg UpdateFCMService
 		&i.ReportingTimezone,
 		&i.UpdateTime,
 		&i.DeletionTime,
+		&i.DefaultTheme,
 	)
 	return i, err
 }
@@ -272,25 +277,29 @@ func (q *Queries) UpdateFCMServiceJSON(ctx context.Context, arg UpdateFCMService
 const updateProjectMeta = `-- name: UpdateProjectMeta :one
 update projects
 set display_name       = coalesce($1, display_name),
-    reporting_timezone = coalesce($2, reporting_timezone)
-where org_id = $3 and id = $4 and deletion_time is null
-returning create_time, display_name, fcm_service_json, id, org_id, reporting_timezone, update_time, deletion_time
+    reporting_timezone = coalesce($2, reporting_timezone),
+    default_theme      = coalesce($3, default_theme)
+where org_id = $4 and id = $5 and deletion_time is null
+returning create_time, display_name, fcm_service_json, id, org_id, reporting_timezone, update_time, deletion_time, default_theme
 `
 
 type UpdateProjectMetaParams struct {
 	DisplayName       pgtype.Text
 	ReportingTimezone pgtype.Text
+	DefaultTheme      pgtype.Text
 	OrgID             string
 	ID                string
 }
 
 // Partial update: a NULL param leaves the column unchanged, so callers can update
-// display_name and reporting_timezone independently. A present empty string is
-// written (an empty reporting_timezone resets to UTC), unlike an omitted NULL.
+// display_name, reporting_timezone and default_theme independently. A present
+// empty string is written (an empty reporting_timezone resets to UTC, an empty
+// default_theme clears the default), unlike an omitted NULL.
 func (q *Queries) UpdateProjectMeta(ctx context.Context, arg UpdateProjectMetaParams) (Project, error) {
 	row := q.db.QueryRow(ctx, updateProjectMeta,
 		arg.DisplayName,
 		arg.ReportingTimezone,
+		arg.DefaultTheme,
 		arg.OrgID,
 		arg.ID,
 	)
@@ -304,6 +313,7 @@ func (q *Queries) UpdateProjectMeta(ctx context.Context, arg UpdateProjectMetaPa
 		&i.ReportingTimezone,
 		&i.UpdateTime,
 		&i.DeletionTime,
+		&i.DefaultTheme,
 	)
 	return i, err
 }

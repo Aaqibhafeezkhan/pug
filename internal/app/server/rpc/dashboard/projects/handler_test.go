@@ -818,3 +818,77 @@ func TestHandler_ApiKeys_RequireProjectScope(t *testing.T) {
 	_, err = srv.DeleteApiKey(ctx, connect.NewRequest(&projectsv1.DeleteApiKeyRequest{Id: proto.String("k1")}))
 	assertCode(t, err, connect.CodeUnauthenticated)
 }
+
+// ----- UpdateMeta: default_theme is stored and served, kept when omitted, cleared by "" ----
+
+func TestHandler_UpdateMeta_DefaultTheme(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	srv, customer, orgID := newIntegrationServer(t)
+	ctx := context.Background()
+
+	created, err := srv.Create(ctxWithCustomer(ctx, customer), connect.NewRequest(&projectsv1.CreateRequest{
+		OrgId:       proto.String(orgID),
+		DisplayName: proto.String("themed"),
+	}))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	projectID := created.Msg.GetProject().GetId()
+	asAdmin := ctxWithCustomerProject(ctx, customer, dbread.Project{ID: projectID, OrgID: orgID})
+
+	// BatchGet reads the row, where Get only echoes the principal's project.
+	served := func() string {
+		t.Helper()
+		resp, err := srv.BatchGet(ctx, connect.NewRequest(&projectsv1.BatchGetRequest{OrgId: proto.String(orgID)}))
+		if err != nil {
+			t.Fatalf("BatchGet: %v", err)
+		}
+		for _, p := range resp.Msg.GetProjects() {
+			if p.GetId() == projectID {
+				return p.GetDefaultTheme()
+			}
+		}
+		t.Fatalf("project %s missing from BatchGet", projectID)
+		return ""
+	}
+
+	if got := served(); got != "" {
+		t.Fatalf("a new project's default_theme = %q, want \"\"", got)
+	}
+
+	const linen = "https://themes.pug.sh/linen/theme.json#dark"
+	updated, err := srv.UpdateMeta(asAdmin, connect.NewRequest(&projectsv1.UpdateMetaRequest{
+		DefaultTheme: proto.String(linen),
+	}))
+	if err != nil {
+		t.Fatalf("UpdateMeta: %v", err)
+	}
+	if got := updated.Msg.GetProject().GetDefaultTheme(); got != linen {
+		t.Errorf("UpdateMeta response default_theme = %q, want %q", got, linen)
+	}
+	if got := served(); got != linen {
+		t.Errorf("after setting it, default_theme = %q, want %q", got, linen)
+	}
+
+	// Omitted: a name-only update must keep the theme.
+	if _, err := srv.UpdateMeta(asAdmin, connect.NewRequest(&projectsv1.UpdateMetaRequest{
+		DisplayName: proto.String("renamed"),
+	})); err != nil {
+		t.Fatalf("UpdateMeta (name only): %v", err)
+	}
+	if got := served(); got != linen {
+		t.Errorf("after a name-only update, default_theme = %q, want %q kept", got, linen)
+	}
+
+	// Present "": clears.
+	if _, err := srv.UpdateMeta(asAdmin, connect.NewRequest(&projectsv1.UpdateMetaRequest{
+		DefaultTheme: proto.String(""),
+	})); err != nil {
+		t.Fatalf("UpdateMeta (clear): %v", err)
+	}
+	if got := served(); got != "" {
+		t.Errorf("after clearing, default_theme = %q, want \"\"", got)
+	}
+}

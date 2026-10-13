@@ -306,6 +306,7 @@ type Project struct {
 	ReportingTimezone string
 	UpdateTime        pgtype.Timestamptz
 	DeletionTime      pgtype.Timestamptz
+	DefaultTheme      string
 }
 
 type ProjectDeletion struct {

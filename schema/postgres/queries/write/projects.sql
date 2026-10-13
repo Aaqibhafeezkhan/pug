@@ -65,10 +65,12 @@ returning *;
 
 -- name: UpdateProjectMeta :one
 -- Partial update: a NULL param leaves the column unchanged, so callers can update
--- display_name and reporting_timezone independently. A present empty string is
--- written (an empty reporting_timezone resets to UTC), unlike an omitted NULL.
+-- display_name, reporting_timezone and default_theme independently. A present
+-- empty string is written (an empty reporting_timezone resets to UTC, an empty
+-- default_theme clears the default), unlike an omitted NULL.
 update projects
 set display_name       = coalesce(sqlc.narg('display_name'), display_name),
-    reporting_timezone = coalesce(sqlc.narg('reporting_timezone'), reporting_timezone)
+    reporting_timezone = coalesce(sqlc.narg('reporting_timezone'), reporting_timezone),
+    default_theme      = coalesce(sqlc.narg('default_theme'), default_theme)
 where org_id = @org_id and id = @id and deletion_time is null
 returning *;

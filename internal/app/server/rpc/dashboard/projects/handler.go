@@ -223,9 +223,12 @@ func (s *server) Delete(
 	return connect.NewResponse(&projectsv1.DeleteResponse{}), nil
 }
 
-// UpdateMeta partially updates the editable metadata (display name + reporting
-// timezone) of the project specified by the x-project-id header. An omitted field
-// is left unchanged; a present reporting_timezone of "" resets it to UTC.
+// UpdateMeta partially updates the editable metadata (display name, reporting
+// timezone and default theme) of the project specified by the x-project-id header.
+// An omitted field is left unchanged; a present reporting_timezone of "" resets it
+// to UTC, and a present default_theme of "" clears it. default_theme needs no
+// check here: its proto rules have already refused anything a member's browser
+// shouldn't request.
 func (s *server) UpdateMeta(
 	ctx context.Context,
 	req *connect.Request[projectsv1.UpdateMetaRequest],
@@ -258,6 +261,7 @@ func (s *server) UpdateMeta(
 		ID:                principal.Project.ID,
 		DisplayName:       postgres.NewNullableText(req.Msg.DisplayName),
 		ReportingTimezone: postgres.NewNullableText(tz),
+		DefaultTheme:      postgres.NewNullableText(req.Msg.DefaultTheme),
 	}
 	projectData, err := s.service.UpdateProjectMeta(ctx, wParams)
 	if err != nil {

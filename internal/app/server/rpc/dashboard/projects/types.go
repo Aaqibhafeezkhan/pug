@@ -14,6 +14,7 @@ import (
 // project's keys are their own resource, read via ListApiKeys.
 func roToRPCMsg(p dbread.Project) *projectsv1.Project {
 	return &projectsv1.Project{
+		DefaultTheme:      proto.String(p.DefaultTheme),
 		DisplayName:       proto.String(p.DisplayName),
 		FcmServiceJson:    proto.String(p.FcmServiceJson.String),
 		Id:                proto.String(p.ID),
