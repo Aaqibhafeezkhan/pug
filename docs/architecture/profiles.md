@@ -54,8 +54,8 @@ Reads serve *persons*, not just profile rows. An app that never calls `identify`
 
 - `ProfilesService.List` is a server-streaming RPC. The server emits `ListResponse` pages until exhaustion.
 - Page size is server-controlled (`const pageSize = 100` in `internal/app/server/rpc/shared/profiles/handler.go`); the client cannot request a custom size.
-- Pagination is keyset-based on `(create_time DESC, id DESC)`. `next_page_token` is an opaque base64url cursor carrying the last row's `create_time` and `id`.
-- For derived anonymous persons `create_time` is the merged first-seen — immutable except when a backfill delivers an *older* event mid-pagination (the person can shift earlier and be missed on that pass; bounded, same class of race the events explorer accepts).
+- Pagination is keyset-based on `(create_time DESC, id DESC)`, compared as epoch milliseconds (`listOrderExpr` in `internal/core/profiles/service.go`). A `time.Time` bound to a `?` placeholder is formatted to whole seconds, so a time comparison seeks from the start of the boundary row's second and skips everyone after that row in the same second. `next_page_token` is an opaque base64url cursor carrying the last row's `create_time` and `id`.
+- For derived anonymous persons `create_time` is the merged first-seen — immutable except when a backfill delivers an *older* event mid-pagination (the person can shift earlier and be listed twice on that pass; bounded, same class of race the events explorer accepts).
 
 **Profiles filter logic.**
 

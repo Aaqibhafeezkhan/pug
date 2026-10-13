@@ -207,6 +207,11 @@ func (s *Service) getSingle(ctx context.Context, projectID string, includeBots b
 	return profile, nil
 }
 
+// listOrderExpr is the list's ordering column, as epoch milliseconds. An Int64
+// binds exactly, while a time.Time bound to a ? placeholder is formatted to
+// whole seconds and would seek from the start of the cursor's second.
+const listOrderExpr = "toUnixTimestamp64Milli(p.create_time)"
+
 func (s *Service) List(ctx context.Context, params ListParams) ([]Profile, error) {
 	if s == nil || s.ch == nil {
 		return nil, errors.New("profiles: clickhouse conn is nil")
@@ -216,7 +221,8 @@ func (s *Service) List(ctx context.Context, params ListParams) ([]Profile, error
 		chq.Eq("p.is_deleted", uint8(0)),
 	}
 	if params.HasCursor {
-		wheres = append(wheres, chq.RawCond("(p.create_time < ? OR (p.create_time = ? AND p.id < ?))", params.CursorTime, params.CursorTime, params.CursorID))
+		wheres = append(wheres, chq.RawCond("("+listOrderExpr+", p.id) < (?, ?)",
+			params.CursorTime.UnixMilli(), params.CursorID))
 	}
 	if !params.Filter.IsZero() {
 		wheres = append(wheres, params.Filter)
@@ -224,7 +230,7 @@ func (s *Service) List(ctx context.Context, params ListParams) ([]Profile, error
 
 	sql, args, err := personsQuery(params.ProjectID, params.IncludeBots).
 		Where(wheres...).
-		OrderBy("p.create_time DESC", "p.id DESC").
+		OrderBy(listOrderExpr+" DESC", "p.id DESC").
 		Limit(int64(params.PageSize)).
 		Build()
 	if err != nil {
@@ -352,7 +358,7 @@ SELECT external_id AS claimed_id FROM latest_profiles WHERE external_id != ''
 // distinct_id_activity_states rollup — the identity materialization already
 // maintained per (project_id, distinct_id) off the event stream. create_time
 // is the merged first-seen — stable in the common case, but an out-of-order
-// backfill can shift it earlier and drop the person from one keyset pass
+// backfill can shift it earlier and list the person twice in one keyset pass
 // (bounded; the same class of race the events explorer accepts, per
 // docs/architecture/profiles.md). update_time is the merged last-seen. The
 // activity fields are aliased exactly as profileActivitySummaryCTE's output so
