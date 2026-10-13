@@ -121,17 +121,43 @@ message FilterGroup {
   common.v1.LogicalOperator operator = 2;
 }
 
+// ProfileListSort names the ordering of List. Ordering is always descending —
+// newest or most recently active first — with the person id breaking ties.
+enum ProfileListSort {
+  // Defaults to PROFILE_LIST_SORT_CREATE_TIME.
+  PROFILE_LIST_SORT_UNSPECIFIED = 0;
+  // Profile.create_time: when an identified profile was created, or a derived
+  // anonymous person's first event. A backfilled older event moves the latter
+  // earlier, which can return that person twice in one pass.
+  PROFILE_LIST_SORT_CREATE_TIME = 1;
+  // ProfileActivitySummary.first_seen. A person with no recorded activity sorts last.
+  // First seen only moves earlier, when an identify merges older anonymous history
+  // into the profile or an older event is backfilled. That can return the person
+  // twice in one pass.
+  PROFILE_LIST_SORT_FIRST_SEEN = 2;
+  // ProfileActivitySummary.last_seen. A person with no recorded activity sorts last.
+  // A person who becomes active mid-pagination moves above the cursor and is not
+  // returned on that pass; restart from an empty token to see them.
+  PROFILE_LIST_SORT_LAST_SEEN = 3;
+}
+
 message ListRequest {
   // Opaque cursor from a previous response's next_page_token. Empty for the first page.
+  // A token is bound to the sort it was issued under, since the seek predicate is
+  // built from the ordering column; send the same sort back, or restart from an
+  // empty token to change it.
   string page_token = 1;
   repeated FilterGroup filter_groups = 2;
   common.v1.LogicalOperator filter_groups_operator = 3;
   // Optional. Traffic tagged as automated at ingest ($bot: crawler user agents
   // and datacenter networks) is EXCLUDED by default. Set true to include bots.
-  // A derived anonymous person's create_time — the sort and cursor key — is
-  // computed after this filter, so changing it mid-pagination skips rows. Keep it
-  // constant for a page_token run and restart from an empty token to flip it.
+  // The sort key — first or last seen, or a derived anonymous person's
+  // create_time (its first event) — is computed after this filter, so changing it
+  // mid-pagination skips rows. Keep it constant for a page_token run and restart
+  // from an empty token to flip it.
   bool include_bots = 4;
+  // Optional. Defaults to PROFILE_LIST_SORT_CREATE_TIME.
+  ProfileListSort sort = 5 [(buf.validate.field).enum = {defined_only: true}];
 }
 
 message ListResponse {

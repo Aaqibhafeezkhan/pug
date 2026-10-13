@@ -32,8 +32,12 @@ func TestProfilesList_PagesWithinOneSecond(t *testing.T) {
 
 	service := profiles.NewService(nil, ch.Conn, nil)
 	want := []string{"anon-a", "anon-b", "anon-c"}
-	if got := walkList(ctx, t, service, projectID, len(want)); !slices.Equal(got, want) {
-		t.Fatalf("order = %v, want %v", got, want)
+	for _, sort := range []profiles.ListSort{profiles.ListSortCreateTime, profiles.ListSortFirstSeen, profiles.ListSortLastSeen} {
+		t.Run(string(sort), func(t *testing.T) {
+			if got := walkList(ctx, t, service, projectID, sort, len(want)); !slices.Equal(got, want) {
+				t.Fatalf("order = %v, want %v", got, want)
+			}
+		})
 	}
 }
 
@@ -44,12 +48,12 @@ func seedEvent(ctx context.Context, t *testing.T, ch *testutil.TestClickHouse, p
 }
 
 // walkList pages through the list one person at a time, seeking each page
-// from the previous row's create time, and returns the ids in order. A walk
+// from the previous row's cursor value, and returns the ids in order. A walk
 // longer than limit fails rather than loop on a seek that never advances.
-func walkList(ctx context.Context, t *testing.T, service *profiles.Service, projectID string, limit int) []string {
+func walkList(ctx context.Context, t *testing.T, service *profiles.Service, projectID string, sort profiles.ListSort, limit int) []string {
 	t.Helper()
 	var order []string
-	params := profiles.ListParams{ProjectID: projectID, PageSize: 1}
+	params := profiles.ListParams{ProjectID: projectID, PageSize: 1, Sort: sort}
 	for {
 		if len(order) > limit {
 			t.Fatalf("pagination did not terminate: %v", order)
@@ -63,7 +67,7 @@ func walkList(ctx context.Context, t *testing.T, service *profiles.Service, proj
 		}
 		order = append(order, got[0].ID)
 		params.HasCursor = true
-		params.CursorTime = got[0].CreateTime
+		params.CursorTime = profiles.ListSortValue(sort, got[0])
 		params.CursorID = got[0].ID
 	}
 }

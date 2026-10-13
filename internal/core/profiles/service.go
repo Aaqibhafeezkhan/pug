@@ -96,6 +96,19 @@ type ProfileActivitySummary struct {
 	Bot            bool
 }
 
+// ListSort orders the person list. Always descending, with the person id
+// breaking ties.
+type ListSort string
+
+const (
+	ListSortCreateTime ListSort = "create_time"
+	ListSortFirstSeen  ListSort = "first_seen"
+	ListSortLastSeen   ListSort = "last_seen"
+)
+
+// ListParams configures one page of List. CursorTime and CursorID seek past
+// the previous page's last row. CursorTime is that row's ListSortValue under
+// the same Sort. The zero Sort orders by create time.
 type ListParams struct {
 	ProjectID   string
 	HasCursor   bool
@@ -104,6 +117,52 @@ type ListParams struct {
 	PageSize    int32
 	Filter      chq.Condition
 	IncludeBots bool
+	Sort        ListSort
+}
+
+// listOrderExpr is the ordering column for sort, as epoch milliseconds. An
+// Int64 binds exactly, while a time.Time bound to a ? placeholder is formatted
+// to whole seconds and would seek from the start of the cursor's second. A
+// person with no activity row reads first and last seen as the epoch (the
+// LEFT JOIN's default for a missing row, which the coalesce repeats), so the
+// activity sorts order them last.
+func listOrderExpr(sort ListSort) string {
+	switch sort {
+	case ListSortFirstSeen:
+		return "toUnixTimestamp64Milli(coalesce(activity_summary.first_seen, toDateTime64(0, 3)))"
+	case ListSortLastSeen:
+		return "toUnixTimestamp64Milli(coalesce(activity_summary.last_seen, toDateTime64(0, 3)))"
+	case ListSortCreateTime:
+		return "toUnixTimestamp64Milli(p.create_time)"
+	default:
+		return "toUnixTimestamp64Milli(p.create_time)"
+	}
+}
+
+// ListSortValue is the Go side of listOrderExpr: the value p was ordered by,
+// which the cursor after it must carry. The two must agree, or the next page
+// seeks on a value the previous one never ordered by. They agree to the
+// millisecond because every column involved is DateTime64(3). For a person
+// without activity they agree because scanProfile leaves Activity nil exactly
+// when total_events is 0, which means there was no activity row and SQL read
+// the epoch.
+func ListSortValue(sort ListSort, p Profile) time.Time {
+	switch sort {
+	case ListSortFirstSeen:
+		if p.Activity == nil {
+			return time.UnixMilli(0).UTC()
+		}
+		return p.Activity.FirstSeen
+	case ListSortLastSeen:
+		if p.Activity == nil {
+			return time.UnixMilli(0).UTC()
+		}
+		return p.Activity.LastSeen
+	case ListSortCreateTime:
+		return p.CreateTime
+	default:
+		return p.CreateTime
+	}
 }
 
 type Service struct {
@@ -207,21 +266,17 @@ func (s *Service) getSingle(ctx context.Context, projectID string, includeBots b
 	return profile, nil
 }
 
-// listOrderExpr is the list's ordering column, as epoch milliseconds. An Int64
-// binds exactly, while a time.Time bound to a ? placeholder is formatted to
-// whole seconds and would seek from the start of the cursor's second.
-const listOrderExpr = "toUnixTimestamp64Milli(p.create_time)"
-
 func (s *Service) List(ctx context.Context, params ListParams) ([]Profile, error) {
 	if s == nil || s.ch == nil {
 		return nil, errors.New("profiles: clickhouse conn is nil")
 	}
 
+	orderExpr := listOrderExpr(params.Sort)
 	wheres := []chq.Condition{
 		chq.Eq("p.is_deleted", uint8(0)),
 	}
 	if params.HasCursor {
-		wheres = append(wheres, chq.RawCond("("+listOrderExpr+", p.id) < (?, ?)",
+		wheres = append(wheres, chq.RawCond(fmt.Sprintf("(%s, p.id) < (?, ?)", orderExpr),
 			params.CursorTime.UnixMilli(), params.CursorID))
 	}
 	if !params.Filter.IsZero() {
@@ -230,7 +285,7 @@ func (s *Service) List(ctx context.Context, params ListParams) ([]Profile, error
 
 	sql, args, err := personsQuery(params.ProjectID, params.IncludeBots).
 		Where(wheres...).
-		OrderBy(listOrderExpr+" DESC", "p.id DESC").
+		OrderBy(orderExpr+" DESC", "p.id DESC").
 		Limit(int64(params.PageSize)).
 		Build()
 	if err != nil {
@@ -368,7 +423,8 @@ SELECT external_id AS claimed_id FROM latest_profiles WHERE external_id != ''
 // primary key, and only the state columns a reference actually uses are read.
 // It is O(project distinct_ids) per query — same class as the identified
 // summary CTE — with a dedicated first-seen-ordered person index as the
-// documented escape hatch if per-project cardinality outgrows it.
+// documented escape hatch if per-project cardinality outgrows it. That index
+// cannot serve ListSortLastSeen, which moves on every event.
 func anonPersonsCTE(projectID string, includeBots bool) *chq.Query {
 	return chq.NewQuery().
 		Select(
