@@ -79,6 +79,11 @@ message Project {
   // IANA reporting timezone (e.g. "Asia/Kolkata") used to bucket day/week/month
   // boundaries for this project's insights and dashboards. Empty string = UTC.
   string reporting_timezone = 7;
+  // The project's default theme, as a theme reference: a built-in id
+  // ("pug-colourblind") or an https URL of a theme file, either optionally ending
+  // in #light or #dark to pin the mode. Empty = no default. Members' browsers
+  // fetch the URL; the server never does.
+  string default_theme = 8;
 }
 
 // ApiKey is one of a project's API keys. It never carries a private key's value:
@@ -145,6 +150,29 @@ message UpdateMetaRequest {
     max_len: 64
     pattern: "^[A-Za-z0-9_+/-]*$"
   }];
+  // Optional (partial update): omit to leave the default theme unchanged; "" clears
+  // it. Otherwise a theme reference (see Project.default_theme). Every member's
+  // browser requests a URL stored here, so a URL must be https with a lowercase
+  // plain DNS host: no userinfo, no IP address, no localhost. "[.]" is a literal
+  // dot, to keep backslashes out of the CEL strings.
+  string default_theme = 3 [
+    (buf.validate.field).string.max_len = 2048,
+    (buf.validate.field).cel = {
+      id: "default_theme.form"
+      message: "must be empty, a built-in theme id, or an https URL, optionally ending in #light or #dark"
+      expression: "this == '' || this.matches('^[a-z0-9-]{1,64}(#(light|dark))?$') || this.matches('^https://[a-z0-9.-]+(:[0-9]{1,5})?(/[!-\"$-~]*)?(#(light|dark))?$')"
+    },
+    (buf.validate.field).cel = {
+      id: "default_theme.installed"
+      message: "an installed theme exists in one browser only"
+      expression: "!this.startsWith('installed-')"
+    },
+    (buf.validate.field).cel = {
+      id: "default_theme.host"
+      message: "the host can't be localhost or an IP address"
+      expression: "!this.matches('^https://([a-z0-9.-]*[.])?localhost[.]?(:[0-9]+)?([/#]|$)') && !this.matches('^https://([a-z0-9-]*[.])*([0-9]+|0x[0-9a-f]*)[.]?(:[0-9]+)?([/#]|$)')"
+    }
+  ];
 }
 
 message UpdateMetaResponse {

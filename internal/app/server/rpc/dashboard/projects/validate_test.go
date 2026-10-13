@@ -98,3 +98,58 @@ func TestDeleteApiKeyRequest_IDRequired(t *testing.T) {
 		t.Fatalf("present id should be valid: %v", err)
 	}
 }
+
+// default_theme is a theme reference that every member's browser will request, so what may be stored is
+// decided here, before the handler: a built-in id or a lowercase https URL with a plain DNS host, either
+// optionally pinned to #light or #dark. Omitted is "leave unchanged"; "" clears.
+func TestUpdateMetaRequest_DefaultTheme(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		ok    bool
+	}{
+		{"empty clears", "", true},
+		{"built-in", "pug-colourblind", true},
+		{"built-in pinned", "pug#dark", true},
+		{"theme file", "https://themes.pug.sh/linen/theme.json", true},
+		{"theme file pinned", "https://themes.pug.sh/linen/theme.json#light", true},
+		{"raw GitHub with a query", "https://raw.githubusercontent.com/acme/brand/main/pug.json?v=2", true},
+		{"a port", "https://cdn.example.com:8443/t.json", true},
+		{"a host that only starts with localhost", "https://localhost.example.com/t.json", true},
+		{"installed id", "installed-3f9a01bc", false},
+		{"http", "http://themes.pug.sh/linen/theme.json", false},
+		{"unknown pin", "https://themes.pug.sh/linen/theme.json#dim", false},
+		{"pin on nothing", "#dark", false},
+		{"uppercase id", "Pug", false},
+		{"uppercase host", "https://Themes.pug.sh/linen/theme.json", false},
+		{"userinfo", "https://user:pass@themes.pug.sh/t.json", false},
+		{"localhost", "https://localhost/t.json", false},
+		{"localhost with a port", "https://localhost:8080/t.json", false},
+		{"a .localhost name", "https://app.localhost/t.json", false},
+		{"IPv4", "https://10.0.0.1/t.json", false},
+		{"decimal IPv4", "https://2130706433/t.json", false},
+		{"hex IPv4", "https://0x7f000001/t.json", false},
+		{"IPv6", "https://[::1]/t.json", false},
+		{"percent-encoded host", "https://%6c%6fcalhost/t.json", false},
+		{"a space in the path", "https://themes.pug.sh/a b.json", false},
+		{"too long", "https://themes.pug.sh/" + strings.Repeat("a", 2048), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := protovalidate.Validate(&projectsv1.UpdateMetaRequest{DefaultTheme: proto.String(tt.value)})
+			if tt.ok && err != nil {
+				t.Fatalf("%q should be valid: %v", tt.value, err)
+			}
+			if !tt.ok && err == nil {
+				t.Fatalf("%q should be refused", tt.value)
+			}
+		})
+	}
+}
+
+func TestUpdateMetaRequest_OmittedDefaultThemeIsValid(t *testing.T) {
+	req := &projectsv1.UpdateMetaRequest{DisplayName: proto.String("ok")}
+	if err := protovalidate.Validate(req); err != nil {
+		t.Fatalf("omitted default_theme should be valid (partial update): %v", err)
+	}
+}

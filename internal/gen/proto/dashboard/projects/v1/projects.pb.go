@@ -432,8 +432,13 @@ type Project struct {
 	// IANA reporting timezone (e.g. "Asia/Kolkata") used to bucket day/week/month
 	// boundaries for this project's insights and dashboards. Empty string = UTC.
 	ReportingTimezone *string `protobuf:"bytes,7,opt,name=reporting_timezone,json=reportingTimezone" json:"reporting_timezone,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The project's default theme, as a theme reference: a built-in id
+	// ("pug-colourblind") or an https URL of a theme file, either optionally ending
+	// in #light or #dark to pin the mode. Empty = no default. Members' browsers
+	// fetch the URL; the server never does.
+	DefaultTheme  *string `protobuf:"bytes,8,opt,name=default_theme,json=defaultTheme" json:"default_theme,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Project) Reset() {
@@ -497,6 +502,13 @@ func (x *Project) GetOrgId() string {
 func (x *Project) GetReportingTimezone() string {
 	if x != nil && x.ReportingTimezone != nil {
 		return *x.ReportingTimezone
+	}
+	return ""
+}
+
+func (x *Project) GetDefaultTheme() string {
+	if x != nil && x.DefaultTheme != nil {
+		return *x.DefaultTheme
 	}
 	return ""
 }
@@ -871,8 +883,14 @@ type UpdateMetaRequest struct {
 	// value is rejected (CodeInvalidArgument) rather than coerced — this is an
 	// explicit settings action.
 	ReportingTimezone *string `protobuf:"bytes,2,opt,name=reporting_timezone,json=reportingTimezone" json:"reporting_timezone,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Optional (partial update): omit to leave the default theme unchanged; "" clears
+	// it. Otherwise a theme reference (see Project.default_theme). Every member's
+	// browser requests a URL stored here, so a URL must be https with a lowercase
+	// plain DNS host: no userinfo, no IP address, no localhost. "[.]" is a literal
+	// dot, to keep backslashes out of the CEL strings.
+	DefaultTheme  *string `protobuf:"bytes,3,opt,name=default_theme,json=defaultTheme" json:"default_theme,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateMetaRequest) Reset() {
@@ -915,6 +933,13 @@ func (x *UpdateMetaRequest) GetDisplayName() string {
 func (x *UpdateMetaRequest) GetReportingTimezone() string {
 	if x != nil && x.ReportingTimezone != nil {
 		return *x.ReportingTimezone
+	}
+	return ""
+}
+
+func (x *UpdateMetaRequest) GetDefaultTheme() string {
+	if x != nil && x.DefaultTheme != nil {
+		return *x.DefaultTheme
 	}
 	return ""
 }
@@ -1063,13 +1088,14 @@ const file_dashboard_projects_v1_projects_proto_rawDesc = "" +
 	"\n" +
 	"GetRequest\"G\n" +
 	"\vGetResponse\x128\n" +
-	"\aproject\x18\x01 \x01(\v2\x1e.dashboard.projects.v1.ProjectR\aproject\"\xd9\x01\n" +
+	"\aproject\x18\x01 \x01(\v2\x1e.dashboard.projects.v1.ProjectR\aproject\"\xfe\x01\n" +
 	"\aProject\x12!\n" +
 	"\fdisplay_name\x18\x01 \x01(\tR\vdisplayName\x12(\n" +
 	"\x10fcm_service_json\x18\x02 \x01(\tR\x0efcmServiceJson\x12\x0e\n" +
 	"\x02id\x18\x03 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x04 \x01(\tR\x05orgId\x12-\n" +
-	"\x12reporting_timezone\x18\a \x01(\tR\x11reportingTimezoneJ\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\x0fprivate_api_keyR\x0epublic_api_key\"\xd9\x01\n" +
+	"\x12reporting_timezone\x18\a \x01(\tR\x11reportingTimezone\x12#\n" +
+	"\rdefault_theme\x18\b \x01(\tR\fdefaultThemeJ\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\x0fprivate_api_keyR\x0epublic_api_key\"\xd9\x01\n" +
 	"\x06ApiKey\x12;\n" +
 	"\vcreate_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"createTime\x12!\n" +
@@ -1090,11 +1116,15 @@ const file_dashboard_projects_v1_projects_proto_rawDesc = "" +
 	"\x03key\x18\x02 \x01(\tR\x03key\"-\n" +
 	"\x13DeleteApiKeyRequest\x12\x16\n" +
 	"\x02id\x18\x01 \x01(\tB\x06\xbaH\x03\xc8\x01\x01R\x02id\"\x16\n" +
-	"\x14DeleteApiKeyResponse\"\x8e\x01\n" +
+	"\x14DeleteApiKeyResponse\"\x9f\x06\n" +
 	"\x11UpdateMetaRequest\x12-\n" +
 	"\fdisplay_name\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x96\x01R\vdisplayName\x12J\n" +
-	"\x12reporting_timezone\x18\x02 \x01(\tB\x1b\xbaH\x18r\x16\x18@2\x12^[A-Za-z0-9_+/-]*$R\x11reportingTimezone\"N\n" +
+	"\x12reporting_timezone\x18\x02 \x01(\tB\x1b\xbaH\x18r\x16\x18@2\x12^[A-Za-z0-9_+/-]*$R\x11reportingTimezone\x12\x8e\x05\n" +
+	"\rdefault_theme\x18\x03 \x01(\tB\xe8\x04\xbaH\xe4\x04\xba\x01\x85\x02\n" +
+	"\x12default_theme.form\x12Ymust be empty, a built-in theme id, or an https URL, optionally ending in #light or #dark\x1a\x93\x01this == '' || this.matches('^[a-z0-9-]{1,64}(#(light|dark))?$') || this.matches('^https://[a-z0-9.-]+(:[0-9]{1,5})?(/[!-\"$-~]*)?(#(light|dark))?$')\xba\x01h\n" +
+	"\x17default_theme.installed\x12-an installed theme exists in one browser only\x1a\x1e!this.startsWith('installed-')\xba\x01\xe7\x01\n" +
+	"\x12default_theme.host\x12,the host can't be localhost or an IP address\x1a\xa2\x01!this.matches('^https://([a-z0-9.-]*[.])?localhost[.]?(:[0-9]+)?([/#]|$)') && !this.matches('^https://([a-z0-9-]*[.])*([0-9]+|0x[0-9a-f]*)[.]?(:[0-9]+)?([/#]|$)')r\x03\x18\x80\x10R\fdefaultTheme\"N\n" +
 	"\x12UpdateMetaResponse\x128\n" +
 	"\aproject\x18\x01 \x01(\v2\x1e.dashboard.projects.v1.ProjectR\aproject\"G\n" +
 	"\x1bUpdateFCMServiceJSONRequest\x12(\n" +
