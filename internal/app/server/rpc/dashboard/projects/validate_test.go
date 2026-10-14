@@ -83,7 +83,7 @@ func TestCreateApiKeyRequest_DisplayNameBounds(t *testing.T) {
 		t.Fatal("display_name over 150 chars should fail max_len")
 	}
 
-	// A label is optional — an unnamed key is fine.
+	// A label is optional: an unnamed key is fine.
 	req.DisplayName = nil
 	if err := protovalidate.Validate(req); err != nil {
 		t.Fatalf("omitted display_name should be valid: %v", err)
@@ -96,5 +96,65 @@ func TestDeleteApiKeyRequest_IDRequired(t *testing.T) {
 	}
 	if err := protovalidate.Validate(&projectsv1.DeleteApiKeyRequest{Id: proto.String("key1")}); err != nil {
 		t.Fatalf("present id should be valid: %v", err)
+	}
+}
+
+func TestUpdateMetaRequest_DefaultTheme(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		ok    bool
+	}{
+		{"empty clears", "", true},
+		{"built-in", "pug-colourblind", true},
+		{"built-in pinned", "pug#dark", true},
+		{"theme file", "https://themes.pug.sh/linen/theme.json", true},
+		{"theme file pinned", "https://themes.pug.sh/linen/theme.json#light", true},
+		{"raw GitHub with a query", "https://raw.githubusercontent.com/acme/brand/main/pug.json?v=2", true},
+		{"a port", "https://cdn.example.com:8443/t.json", true},
+		{"the highest port", "https://cdn.example.com:65535/t.json", true},
+		{"a host with a trailing dot", "https://themes.pug.sh./t.json", true},
+		{"a 63-character label", "https://" + strings.Repeat("a", 63) + ".pug.sh/t.json", true},
+		{"a host that only starts with localhost", "https://localhost.example.com/t.json", true},
+		{"installed id", "installed-3f9a01bc", false},
+		{"http", "http://themes.pug.sh/linen/theme.json", false},
+		{"unknown pin", "https://themes.pug.sh/linen/theme.json#dim", false},
+		{"pin on nothing", "#dark", false},
+		{"uppercase id", "Pug", false},
+		{"uppercase host", "https://Themes.pug.sh/linen/theme.json", false},
+		{"userinfo", "https://user:pass@themes.pug.sh/t.json", false},
+		{"a port over 65535", "https://cdn.example.com:65536/t.json", false},
+		{"an empty label", "https://cdn..example.com/t.json", false},
+		{"a 64-character label", "https://" + strings.Repeat("a", 64) + ".pug.sh/t.json", false},
+		{"localhost", "https://localhost/t.json", false},
+		{"localhost with a port", "https://localhost:8080/t.json", false},
+		{"a .localhost name", "https://app.localhost/t.json", false},
+		{"localhost with a trailing dot", "https://localhost./t.json", false},
+		{"localhost with no path", "https://localhost", false},
+		{"localhost pinned with no path", "https://localhost#dark", false},
+		{"IPv4", "https://10.0.0.1/t.json", false},
+		{"IPv4 with a trailing dot", "https://10.0.0.1./t.json", false},
+		{"IPv4 with a port", "https://10.0.0.1:8080/t.json", false},
+		{"IPv4 with no path", "https://127.0.0.1", false},
+		{"IPv4 pinned with no path", "https://127.0.0.1#dark", false},
+		{"short IPv4", "https://127.1/t.json", false},
+		{"decimal IPv4", "https://2130706433/t.json", false},
+		{"hex IPv4", "https://0x7f000001/t.json", false},
+		{"hex IPv4 with no digits", "https://0x/t.json", false},
+		{"IPv6", "https://[::1]/t.json", false},
+		{"percent-encoded host", "https://%6c%6fcalhost/t.json", false},
+		{"a space in the path", "https://themes.pug.sh/a b.json", false},
+		{"too long", "https://themes.pug.sh/" + strings.Repeat("a", 2048), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := protovalidate.Validate(&projectsv1.UpdateMetaRequest{DefaultTheme: proto.String(tt.value)})
+			if tt.ok && err != nil {
+				t.Fatalf("%q should be valid: %v", tt.value, err)
+			}
+			if !tt.ok && err == nil {
+				t.Fatalf("%q should be refused", tt.value)
+			}
+		})
 	}
 }

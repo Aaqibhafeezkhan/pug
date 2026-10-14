@@ -432,8 +432,12 @@ type Project struct {
 	// IANA reporting timezone (e.g. "Asia/Kolkata") used to bucket day/week/month
 	// boundaries for this project's insights and dashboards. Empty string = UTC.
 	ReportingTimezone *string `protobuf:"bytes,7,opt,name=reporting_timezone,json=reportingTimezone" json:"reporting_timezone,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The project's default theme, as a theme reference: a built-in id
+	// ("pug-colourblind") or an https URL of a theme file, either optionally ending
+	// in #light or #dark to pin the mode. Empty = no default.
+	DefaultTheme  *string `protobuf:"bytes,8,opt,name=default_theme,json=defaultTheme" json:"default_theme,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Project) Reset() {
@@ -501,6 +505,13 @@ func (x *Project) GetReportingTimezone() string {
 	return ""
 }
 
+func (x *Project) GetDefaultTheme() string {
+	if x != nil && x.DefaultTheme != nil {
+		return *x.DefaultTheme
+	}
+	return ""
+}
+
 // ApiKey is one of a project's API keys. It never carries a private key's value:
 // only its digest is stored, so CreateApiKey's response is the one and only time
 // a private key is visible.
@@ -510,8 +521,8 @@ type ApiKey struct {
 	DisplayName *string                `protobuf:"bytes,2,opt,name=display_name,json=displayName" json:"display_name,omitempty"`
 	Id          *string                `protobuf:"bytes,3,opt,name=id" json:"id,omitempty"`
 	Kind        *ApiKeyKind            `protobuf:"varint,4,opt,name=kind,enum=dashboard.projects.v1.ApiKeyKind" json:"kind,omitempty"`
-	// Full value for a public key; empty for a private key — use `masked` to
-	// identify one of those.
+	// Full value for a public key; empty for a private key (use `masked` to
+	// identify one of those).
 	Key *string `protobuf:"bytes,5,opt,name=key" json:"key,omitempty"`
 	// Fixed-format hint ("prv_...3f9c") to tell a project's keys apart.
 	Masked        *string `protobuf:"bytes,6,opt,name=masked" json:"masked,omitempty"`
@@ -727,7 +738,7 @@ func (x *CreateApiKeyRequest) GetDisplayName() string {
 type CreateApiKeyResponse struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	ApiKey *ApiKey                `protobuf:"bytes,1,opt,name=api_key,json=apiKey" json:"api_key,omitempty"`
-	// The full key. For a private key this is the only time it is ever returned —
+	// The full key. For a private key this is the only time it is ever returned;
 	// it is unrecoverable afterwards.
 	Key           *string `protobuf:"bytes,2,opt,name=key" json:"key,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -868,11 +879,15 @@ type UpdateMetaRequest struct {
 	DisplayName *string `protobuf:"bytes,1,opt,name=display_name,json=displayName" json:"display_name,omitempty"`
 	// IANA timezone (e.g. "Asia/Kolkata") aligning insight/dashboard bucket
 	// boundaries to the project's calendar. Empty = UTC. Unlike creation, a malformed
-	// value is rejected (CodeInvalidArgument) rather than coerced — this is an
+	// value is rejected (CodeInvalidArgument) rather than coerced, since this is an
 	// explicit settings action.
 	ReportingTimezone *string `protobuf:"bytes,2,opt,name=reporting_timezone,json=reportingTimezone" json:"reporting_timezone,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Optional (partial update): omit to leave it unchanged; "" clears it. Members'
+	// browsers fetch a URL stored here and the server never does, so a URL must be
+	// https with a lowercase DNS host: no userinfo, no IP address, no localhost.
+	DefaultTheme  *string `protobuf:"bytes,3,opt,name=default_theme,json=defaultTheme" json:"default_theme,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateMetaRequest) Reset() {
@@ -915,6 +930,13 @@ func (x *UpdateMetaRequest) GetDisplayName() string {
 func (x *UpdateMetaRequest) GetReportingTimezone() string {
 	if x != nil && x.ReportingTimezone != nil {
 		return *x.ReportingTimezone
+	}
+	return ""
+}
+
+func (x *UpdateMetaRequest) GetDefaultTheme() string {
+	if x != nil && x.DefaultTheme != nil {
+		return *x.DefaultTheme
 	}
 	return ""
 }
@@ -1063,13 +1085,14 @@ const file_dashboard_projects_v1_projects_proto_rawDesc = "" +
 	"\n" +
 	"GetRequest\"G\n" +
 	"\vGetResponse\x128\n" +
-	"\aproject\x18\x01 \x01(\v2\x1e.dashboard.projects.v1.ProjectR\aproject\"\xd9\x01\n" +
+	"\aproject\x18\x01 \x01(\v2\x1e.dashboard.projects.v1.ProjectR\aproject\"\xfe\x01\n" +
 	"\aProject\x12!\n" +
 	"\fdisplay_name\x18\x01 \x01(\tR\vdisplayName\x12(\n" +
 	"\x10fcm_service_json\x18\x02 \x01(\tR\x0efcmServiceJson\x12\x0e\n" +
 	"\x02id\x18\x03 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x04 \x01(\tR\x05orgId\x12-\n" +
-	"\x12reporting_timezone\x18\a \x01(\tR\x11reportingTimezoneJ\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\x0fprivate_api_keyR\x0epublic_api_key\"\xd9\x01\n" +
+	"\x12reporting_timezone\x18\a \x01(\tR\x11reportingTimezone\x12#\n" +
+	"\rdefault_theme\x18\b \x01(\tR\fdefaultThemeJ\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\x0fprivate_api_keyR\x0epublic_api_key\"\xd9\x01\n" +
 	"\x06ApiKey\x12;\n" +
 	"\vcreate_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"createTime\x12!\n" +
@@ -1090,11 +1113,15 @@ const file_dashboard_projects_v1_projects_proto_rawDesc = "" +
 	"\x03key\x18\x02 \x01(\tR\x03key\"-\n" +
 	"\x13DeleteApiKeyRequest\x12\x16\n" +
 	"\x02id\x18\x01 \x01(\tB\x06\xbaH\x03\xc8\x01\x01R\x02id\"\x16\n" +
-	"\x14DeleteApiKeyResponse\"\x8e\x01\n" +
+	"\x14DeleteApiKeyResponse\"\xa9\a\n" +
 	"\x11UpdateMetaRequest\x12-\n" +
 	"\fdisplay_name\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x96\x01R\vdisplayName\x12J\n" +
-	"\x12reporting_timezone\x18\x02 \x01(\tB\x1b\xbaH\x18r\x16\x18@2\x12^[A-Za-z0-9_+/-]*$R\x11reportingTimezone\"N\n" +
+	"\x12reporting_timezone\x18\x02 \x01(\tB\x1b\xbaH\x18r\x16\x18@2\x12^[A-Za-z0-9_+/-]*$R\x11reportingTimezone\x12\x98\x06\n" +
+	"\rdefault_theme\x18\x03 \x01(\tB\xf2\x05\xbaH\xee\x05\xba\x01\x82\x03\n" +
+	"\x12default_theme.form\x12smust be empty, a built-in theme id, or an https URL with a lowercase DNS host, optionally ending in #light or #dark\x1a\xf6\x01this == '' || this.matches('^[a-z0-9-]{1,64}(#(light|dark))?$')|| this.matches('^https://[a-z0-9-]{1,63}([.][a-z0-9-]{1,63})*[.]?(:([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(/[!-\"$-~]*)?(#(light|dark))?$')\xba\x01u\n" +
+	"\x17default_theme.installed\x12:can't be an installed theme: it exists in one browser only\x1a\x1e!this.startsWith('installed-')\xba\x01\xe7\x01\n" +
+	"\x12default_theme.host\x12,the host can't be localhost or an IP address\x1a\xa2\x01!this.matches('^https://([a-z0-9.-]*[.])?localhost[.]?(:[0-9]+)?([/#]|$)') && !this.matches('^https://([a-z0-9-]*[.])*([0-9]+|0x[0-9a-f]*)[.]?(:[0-9]+)?([/#]|$)')r\x03\x18\x80\x10R\fdefaultTheme\"N\n" +
 	"\x12UpdateMetaResponse\x128\n" +
 	"\aproject\x18\x01 \x01(\v2\x1e.dashboard.projects.v1.ProjectR\aproject\"G\n" +
 	"\x1bUpdateFCMServiceJSONRequest\x12(\n" +
