@@ -20,3 +20,4 @@ docs/plans
 docs/specs
 # gate build output; CI runs it with `go run`
 /tools/cla/gate/gate
+/security-audit
