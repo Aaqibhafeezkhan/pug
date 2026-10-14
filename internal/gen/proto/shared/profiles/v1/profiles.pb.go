@@ -83,8 +83,8 @@ func (ComplianceRequestStatus) EnumDescriptor() ([]byte, []int) {
 	return file_shared_profiles_v1_profiles_proto_rawDescGZIP(), []int{0}
 }
 
-// ProfileListSort names the ordering of List. Ordering is always descending —
-// newest or most recently active first — with the person id breaking ties.
+// ProfileListSort names the ordering of List. Ordering is always descending
+// (newest or most recently active first), with the person id breaking ties.
 type ProfileListSort int32
 
 const (
@@ -94,18 +94,18 @@ const (
 	// anonymous person's first event. A backfilled older event moves the latter
 	// earlier, which can return that person twice in one pass.
 	ProfileListSort_PROFILE_LIST_SORT_CREATE_TIME ProfileListSort = 1
-	// ProfileActivitySummary.first_seen. A person with no recorded activity sorts last.
-	// First seen usually moves earlier mid-pagination, when an identify merges older
-	// anonymous history or an older event is backfilled. That can return the person
-	// twice on that pass. It moves later when a person gets their first event, or
-	// when an anonymous id is identified as another user and its history leaves the
-	// profile. That can miss the person on that pass.
+	// ProfileActivitySummary.first_seen. A person with no recorded activity sorts as
+	// if seen at the epoch. First seen usually moves earlier mid-pagination, when an
+	// identify merges older anonymous history or an older event is backfilled. That
+	// can return the person twice on that pass. It moves later when a person gets
+	// their first event, or when an anonymous id is identified as another user and
+	// its history leaves the profile. That can miss the person on that pass.
 	ProfileListSort_PROFILE_LIST_SORT_FIRST_SEEN ProfileListSort = 2
-	// ProfileActivitySummary.last_seen. A person with no recorded activity sorts last.
-	// A person who becomes active mid-pagination moves above the cursor and is not
-	// returned on that pass; restart from an empty token to see them. Last seen moves
-	// earlier only when an anonymous id is identified as another user and its history
-	// leaves the profile, which can return the person twice.
+	// ProfileActivitySummary.last_seen. A person with no recorded activity sorts as
+	// if seen at the epoch. A person who becomes active mid-pagination moves above
+	// the cursor and is not returned on that pass; restart from an empty token to
+	// see them. Last seen moves earlier when an anonymous id is identified as another
+	// user and its history leaves the profile, which can return the person twice.
 	ProfileListSort_PROFILE_LIST_SORT_LAST_SEEN ProfileListSort = 3
 )
 
@@ -757,10 +757,10 @@ type ListRequest struct {
 	FilterGroupsOperator *v1.LogicalOperator `protobuf:"varint,3,opt,name=filter_groups_operator,json=filterGroupsOperator,enum=common.v1.LogicalOperator" json:"filter_groups_operator,omitempty"`
 	// Optional. Traffic tagged as automated at ingest ($bot: crawler user agents
 	// and datacenter networks) is EXCLUDED by default. Set true to include bots.
-	// The sort key — first or last seen, or a derived anonymous person's
-	// create_time (its first event) — is computed after this filter, so changing it
-	// mid-pagination skips rows. Keep it constant for a page_token run and restart
-	// from an empty token to flip it.
+	// The sort key (first or last seen, or a derived anonymous person's
+	// create_time, which is its first event) is computed after this filter, so
+	// changing it mid-pagination skips rows. Keep it constant for a page_token run
+	// and restart from an empty token to flip it.
 	IncludeBots *bool `protobuf:"varint,4,opt,name=include_bots,json=includeBots" json:"include_bots,omitempty"`
 	// Optional. Defaults to PROFILE_LIST_SORT_CREATE_TIME.
 	Sort          *ProfileListSort `protobuf:"varint,5,opt,name=sort,enum=shared.profiles.v1.ProfileListSort" json:"sort,omitempty"`
@@ -902,7 +902,7 @@ type ProfileActivitySummary struct {
 	Region         *string                `protobuf:"bytes,12,opt,name=region" json:"region,omitempty"`
 	City           *string                `protobuf:"bytes,13,opt,name=city" json:"city,omitempty"`
 	// True when EVERY event counted in this summary was tagged as automated at
-	// ingest ($bot) — a crawler, not a user with one tagged event. Only ever true
+	// ingest ($bot): a crawler, not a user with one tagged event. Only ever true
 	// on a read that set include_bots, since bot traffic is otherwise excluded.
 	Bot           *bool `protobuf:"varint,14,opt,name=bot" json:"bot,omitempty"`
 	unknownFields protoimpl.UnknownFields

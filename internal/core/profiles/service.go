@@ -25,7 +25,7 @@ var unrecognisedJSONTypeCounter metric.Int64Counter
 
 // degradedAliasErasureCounter counts erase-by-id requests whose alias resolved
 // to a canonical with no live profile row. Tagged with outcome: "failed_closed"
-// (a chained alias we refuse to partially erase — alert on this) or
+// (a chained alias we refuse to partially erase; alert on this) or
 // "residual_cleanup" (a terminal canonical already erased; benign).
 var degradedAliasErasureCounter metric.Int64Counter
 
@@ -33,7 +33,7 @@ func init() {
 	meter := otel.Meter("github.com/pug-sh/pug/internal/core/profiles")
 	var err error
 	// Monitoring guidance: a non-zero rate on this counter means CH/driver
-	// emitted a Go type the unwrap switch doesn't handle — those values are
+	// emitted a Go type the unwrap switch doesn't handle. Those values are
 	// dropped from Profile.Properties. Investigate the go_type label and add
 	// an explicit case in unwrapJSONVariant if the new shape is legitimate.
 	unrecognisedJSONTypeCounter, err = meter.Int64Counter(
@@ -47,7 +47,7 @@ func init() {
 		slog.ErrorContext(context.Background(), "failed to register profiles.unrecognised_json_type_total counter", slogx.Error(err))
 	}
 
-	// Monitoring guidance: alert on outcome="failed_closed" — a data-integrity
+	// Monitoring guidance: alert on outcome="failed_closed", a data-integrity
 	// anomaly where an erase-by-id spanned an alias chain we could not fully
 	// resolve and refused to partially erase. outcome="residual_cleanup" is the
 	// benign post-erasure case and does not need alerting.
@@ -121,9 +121,8 @@ type ListParams struct {
 }
 
 // ListedProfile is a List row: the profile and the key the query ordered it by
-// (listOrderExpr, epoch milliseconds). The next page's cursor must carry that
-// key itself rather than rebuild it from Profile, whose Activity is nil for a
-// person SQL may still have ordered by a non-epoch key.
+// (listOrderExpr, epoch milliseconds). The next cursor carries this key as
+// selected, so it cannot drift from the ORDER BY.
 type ListedProfile struct {
 	Profile
 	SortKey int64
@@ -134,7 +133,7 @@ type ListedProfile struct {
 // to whole seconds and would seek from the start of the cursor's second. A
 // person with no activity row reads first and last seen as the epoch (the
 // LEFT JOIN's default for a missing row, which the coalesce repeats), so the
-// activity sorts order them after anyone whose activity is dated after 1970.
+// activity sorts order them after anyone active since 1970.
 func listOrderExpr(sort ListSort) string {
 	switch sort {
 	case ListSortFirstSeen:
@@ -173,8 +172,8 @@ func NewService(pgW *pgxpool.Pool, ch driver.Conn, producer *natsdeps.NATSClient
 }
 
 // GetByID resolves a person by id: an identified profile row, a derived
-// anonymous person (the id IS the distinct_id), or — when the id is an alias
-// claimed by an identify merge — the canonical profile it was merged into, so
+// anonymous person (the id IS the distinct_id), or, when the id is an alias
+// claimed by an identify merge, the canonical profile it was merged into, so
 // pre-identify URLs and event links keep working after the merge.
 func (s *Service) GetByID(ctx context.Context, projectID, id string, includeBots bool) (Profile, error) {
 	profile, err := s.getSingle(ctx, projectID, includeBots, chq.Eq("p.id", id))
@@ -266,8 +265,6 @@ func (s *Service) List(ctx context.Context, params ListParams) ([]ListedProfile,
 		wheres = append(wheres, params.Filter)
 	}
 
-	// The key is selected after profileSelectColumns, so scanProfile reads it
-	// through its extra destinations.
 	sql, args, err := personsQuery(params.ProjectID, params.IncludeBots).
 		Select(orderExpr+" AS list_sort_key").
 		Where(wheres...).
@@ -308,7 +305,7 @@ func (s *Service) List(ctx context.Context, params ListParams) ([]ListedProfile,
 // (argMax by insert_time over the ReplacingMergeTree), project-scoped.
 // Registered by WithIdentityUnion; identity_union reads it by name.
 //
-// WARNING: personsCTE unions this projection by POSITION — keep this Select's
+// WARNING: personsCTE unions this projection by POSITION. Keep this Select's
 // column order (create_time, external_id, id, project_id, properties,
 // update_time, is_deleted) in sync with personsCTE's anon branch, or the union
 // will silently transpose data rather than error.
@@ -368,17 +365,17 @@ func personsQuery(projectID string, includeBots bool) *chq.Query {
 // claimedIDsCTE projects every distinct_id already owned by the identify
 // pipeline, i.e. the ids that must NOT surface as their own anonymous person:
 //
-//   - alias_ids — anonymous identities absorbed into an identified profile by
+//   - alias_ids: anonymous identities absorbed into an identified profile by
 //     an identify merge. This is also what makes a MERGED identity's exclusion
 //     resurrection-proof: a late event for a merged distinct_id re-fires the
 //     activity MV, but the alias keeps the id claimed, so nothing reappears
-//     (there is no row to un-delete — persons are derived, not written). (An
+//     (there is no row to un-delete; persons are derived, not written). (An
 //     erased *unmerged* anon person is not claimed and may re-materialize on
-//     genuinely new post-erasure activity — that is correct, not a resurrection.)
-//   - profile ids — including soft-deleted tombstones (is_deleted is not
+//     genuinely new post-erasure activity. That is correct, not a resurrection.)
+//   - profile ids, including soft-deleted tombstones (is_deleted is not
 //     consulted): a tombstoned id must stay invisible, not resurface as a
 //     derived person.
-//   - non-empty external_ids — post-identify events are keyed by external_id;
+//   - non-empty external_ids: post-identify events are keyed by external_id;
 //     without this every identified user would grow a trait-less anonymous
 //     doppelgänger.
 //
@@ -397,19 +394,19 @@ SELECT external_id AS claimed_id FROM latest_profiles WHERE external_id != ''
 }
 
 // anonPersonsCTE derives one person row per unclaimed distinct_id from the
-// distinct_id_activity_states rollup — the identity materialization already
+// distinct_id_activity_states rollup, the identity materialization already
 // maintained per (project_id, distinct_id) off the event stream. create_time
-// is the merged first-seen — stable in the common case, but an out-of-order
-// backfill can shift it earlier and list the person twice in one keyset pass
-// (bounded; the same class of race the events explorer accepts, per
-// docs/architecture/profiles.md). update_time is the merged last-seen. The
-// activity fields are aliased exactly as profileActivitySummaryCTE's output so
-// personsActivityCTE can union the two by position.
+// is the merged first-seen. It is stable in the common case, but an
+// out-of-order backfill can shift it earlier and list the person twice in one
+// keyset pass (bounded; see docs/architecture/profiles.md). update_time is the
+// merged last-seen. The activity fields are aliased exactly as
+// profileActivitySummaryCTE's output so personsActivityCTE can union the two by
+// position.
 //
 // Cost posture: this is a streaming GROUP BY over the states table's own
 // primary key, and only the state columns a reference actually uses are read.
-// It is O(project distinct_ids) per query — same class as the identified
-// summary CTE — with a dedicated first-seen-ordered person index as the
+// It is O(project distinct_ids) per query, the same class as the identified
+// summary CTE, with a dedicated first-seen-ordered person index as the
 // documented escape hatch if per-project cardinality outgrows it. That index
 // cannot serve ListSortLastSeen, which moves on every event.
 func anonPersonsCTE(projectID string, includeBots bool) *chq.Query {
@@ -478,7 +475,7 @@ FROM anon_persons
 }
 
 // personsActivityCTE unions the identified activity summary with the derived
-// anonymous persons' activity (already one row per distinct_id — no alias
+// anonymous persons' activity (already one row per distinct_id, so no alias
 // fan-out to re-aggregate). Keys are disjoint by construction: anon_persons
 // excludes every claimed id, so the LEFT JOIN in personsQuery stays 1:≤1.
 func personsActivityCTE() *chq.Query {
@@ -540,14 +537,14 @@ func (s *Service) resolveAliasTarget(ctx context.Context, projectID, aliasID str
 // profileActivitySummaryCTE aggregates per-IDENTIFIED-profile activity
 // (registered as identified_activity in personsQuery; derived anonymous
 // persons carry their own single-distinct_id summary via anonPersonsCTE) by
-// joining the identity_union CTE — every distinct_id that maps to the profile
-// — to the distinct_id_activity_states rollup and re-aggregating to one row
-// per profile. identity_union's arrayDistinct dedups across all three id
+// joining the identity_union CTE (every distinct_id that maps to the profile)
+// to the distinct_id_activity_states rollup and re-aggregating to one row per
+// profile. identity_union's arrayDistinct dedups across all three id
 // sources, so a value repeated between id, external_id and an alias_id yields
 // one row and its state is merged once.
 //
-// WARNING: personsActivityCTE unions this output by POSITION with anonPersonsCTE
-// — keep this Select's column order in sync with both, or the activity summary
+// WARNING: personsActivityCTE unions this output by POSITION with anonPersonsCTE.
+// Keep this Select's column order in sync with both, or the activity summary
 // will silently bind to the wrong columns.
 func profileActivitySummaryCTE(projectID string, includeBots bool) *chq.Query {
 	return chq.NewQuery().
@@ -630,7 +627,7 @@ func scanProfile(ctx context.Context, rows driver.Rows, extra ...any) (Profile, 
 // Always returns a non-nil map; nil input is treated as empty.
 //
 // Top-level keys whose value unwraps to nil are dropped from the output. This
-// catches unknown-type fallbacks from unwrapJSONVariant — those return nil so
+// catches unknown-type fallbacks from unwrapJSONVariant, which return nil so
 // the unrecognised value never reaches API consumers as a debug string. Note
 // that nested-level nils inside `map[string]any` recursion are NOT dropped;
 // chcol.NestedMap() has already removed null Variants from the input at every
@@ -652,7 +649,7 @@ func unwrapJSONProperties(ctx context.Context, j *chcol.JSON) map[string]any {
 // unwrapJSONValue dispatches by container shape: nested maps recurse, Variant
 // cells (dynamic paths) route to unwrapJSONVariant, and raw values (typed
 // declared subcolumns, where the driver hands back native Go types directly)
-// are wrapped in a Variant so the same type switch normalises them — otherwise
+// are wrapped in a Variant so the same type switch normalises them. Otherwise
 // time.Time / []*string / []chcol.JSON would leak into structpb.NewStruct and
 // fail the entire profile read.
 func unwrapJSONValue(ctx context.Context, v any) any {

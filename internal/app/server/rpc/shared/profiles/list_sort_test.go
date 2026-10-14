@@ -81,15 +81,16 @@ func TestList_SortedPagesResumeFromToken(t *testing.T) {
 	ch := testutil.SetupClickHouse(t)
 	projectID := xid.New().String()
 
-	// anon-000 … anon-100: person i is first seen at base+i s and last seen at
-	// base+1000-i s.
-	base := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+	// anon-000 … anon-100: person i is first seen at base+i ms and last seen at
+	// base+1000-i ms. base sits mid-second, so a token that drops milliseconds
+	// skips the remaining person under either sort.
+	base := time.Now().UTC().Truncate(time.Second).Add(-time.Hour + 500*time.Millisecond)
 	ids := make([]string, pageSize+1)
 	for i := range ids {
 		ids[i] = fmt.Sprintf("anon-%03d", i)
-		for _, sec := range []int{i, 1000 - i} {
+		for _, ms := range []int{i, 1000 - i} {
 			testutil.InsertEvent(ctx, t, ch.Conn, uuid.NewString(), projectID, ids[i], "page_view", uuid.NewString(),
-				map[string]string{}, map[string]string{}, base.Add(time.Duration(sec)*time.Second))
+				map[string]string{}, map[string]string{}, base.Add(time.Duration(ms)*time.Millisecond))
 		}
 	}
 	newestFirst := slices.Clone(ids)

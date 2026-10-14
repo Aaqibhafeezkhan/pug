@@ -41,8 +41,8 @@ func TestProfilesList_Sorts(t *testing.T) {
 	// anon-b     20     20     20
 	// anon-c     60     60     60
 	// u-1        30     10     40   identified after its first events
-	// u-2        40      —      —   identified, no activity
-	// u-3         5      —      —   identified, no activity
+	// u-2        40      -      -   identified, no activity
+	// u-3         5      -      -   identified, no activity
 	seedEvent(ctx, t, ch, projectID, "anon-a", at(0))
 	seedEvent(ctx, t, ch, projectID, "anon-a", at(50))
 	seedEvent(ctx, t, ch, projectID, "anon-b", at(20))

@@ -217,7 +217,7 @@ func profileListSort(sort profilesv1.ProfileListSort) coreprofiles.ListSort {
 }
 
 // pageSize is the server-controlled batch size for streaming profile pages.
-// Not configurable by the client — there is no page_size field in the proto request.
+// Not configurable by the client: there is no page_size field in the proto request.
 const pageSize = 100
 
 func (s *Server) List(
