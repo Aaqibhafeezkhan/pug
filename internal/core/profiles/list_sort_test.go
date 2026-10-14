@@ -14,9 +14,8 @@ import (
 // walk over it. In the fixture, create time, first seen and last seen all
 // disagree, so a sort that reads another column comes out in a different
 // order. So does a cursor that seeks on one. Walking one row per page makes
-// every row's cursor value seek. Under the activity sorts, u-3 → u-2 crosses
-// the tie of people with no activity, which SQL and ListSortValue must both
-// key on the epoch.
+// every row's sort key seek. Under the activity sorts, u-3 → u-2 crosses the
+// tie of people with no activity, all keyed on the epoch.
 func TestProfilesList_Sorts(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -42,8 +41,8 @@ func TestProfilesList_Sorts(t *testing.T) {
 	// anon-b     20     20     20
 	// anon-c     60     60     60
 	// u-1        30     10     40   identified after its first events
-	// u-2        40      —      —   identified, no activity
-	// u-3         5      —      —   identified, no activity
+	// u-2        40      -      -   identified, no activity
+	// u-3         5      -      -   identified, no activity
 	seedEvent(ctx, t, ch, projectID, "anon-a", at(0))
 	seedEvent(ctx, t, ch, projectID, "anon-a", at(50))
 	seedEvent(ctx, t, ch, projectID, "anon-b", at(20))
