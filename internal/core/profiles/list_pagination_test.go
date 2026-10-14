@@ -48,7 +48,7 @@ func seedEvent(ctx context.Context, t *testing.T, ch *testutil.TestClickHouse, p
 }
 
 // walkList pages through the list one person at a time, seeking each page
-// from the previous row's cursor value, and returns the ids in order. A walk
+// from the previous row's sort key, and returns the ids in order. A walk
 // longer than limit fails rather than loop on a seek that never advances.
 func walkList(ctx context.Context, t *testing.T, service *profiles.Service, projectID string, sort profiles.ListSort, limit int) []string {
 	t.Helper()
@@ -67,7 +67,7 @@ func walkList(ctx context.Context, t *testing.T, service *profiles.Service, proj
 		}
 		order = append(order, got[0].ID)
 		params.HasCursor = true
-		params.CursorTime = profiles.ListSortValue(sort, got[0])
+		params.CursorKey = got[0].SortKey
 		params.CursorID = got[0].ID
 	}
 }
