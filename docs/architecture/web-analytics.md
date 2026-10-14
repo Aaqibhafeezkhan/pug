@@ -355,12 +355,13 @@ fix the rollup (an MV fires only on INSERT), so the blank rows are permanent unl
 
 **Repair (one procedure, covers every case).** Optional, and sized by the window's traffic rather
 than the table: run migration 008's derivation mutation, then migration 009's `DELETE` of the new
-`dim_name`s followed by its delta backfill INSERT. **Post-011 addendum:** once migration 011 has
-run, the rollup carries a `cookieless` key column, so 009's positional INSERT no longer matches
-the table; a manual repair must name the columns AND compute the flag: use 009's backfill body
-with `INSERT INTO dashboard_event_rollup_daily (project_id, day, kind, dim_name, dim_value, cnt,
-uniq_state, cookieless) SELECT …, toUInt8(startsWith(distinct_id, 'cookieless-')) AS cookieless …
-GROUP BY project_id, day, kind, dim_name, dim_value, cookieless`. (Goose itself never hits this:
+`dim_name`s followed by its delta backfill INSERT. **Post-011/012 addendum:** migrations 011 and
+012 add the `cookieless` and `bot` key columns, so 009's positional INSERT no longer matches the
+table; a manual repair must name the columns AND compute both flags, or bot rows rebuild as human:
+use 009's backfill body with `INSERT INTO dashboard_event_rollup_daily (project_id, day, kind,
+dim_name, dim_value, cnt, uniq_state, cookieless, bot) SELECT …, toUInt8(startsWith(distinct_id,
+'cookieless-')) AS cookieless, toUInt8(bot) AS bot … GROUP BY project_id, day, kind, dim_name,
+dim_value, cookieless, bot`. (Goose itself never hits this:
 a retried 009 always executes before 011 in migration order;
 `TestIntegrationWebAnalytics/event_rollup_backfill_009_rerunnable` pins the shipped statement's
 idempotency with the seven-column list.) That rebuilds the new dims from `events`, the
