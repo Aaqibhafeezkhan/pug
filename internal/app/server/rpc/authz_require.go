@@ -30,9 +30,9 @@ type memberRoleLookup interface {
 // Role assignment is resolved per request (roles are deliberately NOT in the
 // JWT); the policy comes from the injected Authorizer. Denials are uniform:
 //
-//   - not a member            -> PermissionDenied(ORG_NOT_A_MEMBER)
-//   - member lacking the perm -> PermissionDenied(ORG_ROLE_FORBIDDEN)
-//   - role-lookup / enforce failure -> CodeInternal
+//   - not a member: PermissionDenied(ORG_NOT_A_MEMBER)
+//   - a member lacking the permission: PermissionDenied(ORG_ROLE_FORBIDDEN)
+//   - a role-lookup or enforce failure: CodeInternal
 func requirePermission(
 	ctx context.Context,
 	authorizer *authz.Authorizer,
@@ -57,9 +57,9 @@ func requirePermission(
 		// The lookup logs + records non-sentinel failures at source.
 		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
 	}
-	// Anyone can sign in as the demo account, so it is a viewer in every org,
-	// whatever role is stored.
-	if isDemoViewer(ctx) {
+	// Anyone can sign in as the demo viewer, and the demo user's password was once
+	// published, so both are viewers in every org, whatever role is stored.
+	if isDemoAccount(ctx) {
 		role = coreorgs.RoleViewer
 	}
 

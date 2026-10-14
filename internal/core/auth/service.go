@@ -76,14 +76,14 @@ const (
 	// below. What it really bounds is how long an already-exfiltrated JWT
 	// outlives SignOut, since WithJWTAuth verifies the signature without
 	// consulting the refresh family. Role changes and member removal take effect
-	// at any TTL — authorization resolves per-request from org_members, never
+	// at any TTL: authorization resolves per-request from org_members, never
 	// from a claim.
 	//
 	// The number is therefore set by refresh cost, not leak risk. Every refresh
 	// is a FOR UPDATE-locked tx that inserts a row (see createRefreshToken's
 	// pruning TODO) and rotates the token within its family, and racing rotations
 	// are what trip reuse-detection. 24h puts that at ~once per active user per
-	// day. Keep it far below refreshTokenTTL — nothing enforces that ratio;
+	// day. Keep it far below refreshTokenTTL. Nothing enforces that ratio;
 	// service_test.go pins this constant's absolute value at ~24h.
 	accessTokenTTL = 24 * time.Hour
 	// refreshTokenTTL is the sliding lifetime of a refresh token. Every refresh
@@ -143,8 +143,10 @@ func NewService(ctx context.Context, pgRO *pgxpool.Pool, pgW *pgxpool.Pool, jwtK
 }
 
 func (s *Service) SignInWithEmail(ctx context.Context, email, password string) (Session, error) {
-	// DemoSignIn is the demo account's only way in, so PUG_DEMO_ENABLED off locks it.
-	if strings.EqualFold(email, DemoViewerEmail) {
+	// Neither demo account signs in with a password. That leaves the viewer only
+	// DemoSignIn, so PUG_DEMO_ENABLED off locks it out. The demo user's password was
+	// once published, and an old database may still hold its hash.
+	if IsDemoAccount(email) {
 		return Session{}, ErrInvalidCredentials
 	}
 	// Before the account lookup, so SSO_REQUIRED says nothing about whether one exists.
@@ -162,7 +164,7 @@ func (s *Service) SignInWithEmail(ctx context.Context, email, password string) (
 	}
 
 	if customer.PasswordHash == "" {
-		// Passwordless (magic-link) account — no password set. Treat as invalid
+		// Passwordless (magic-link) account: no password set. Treat as invalid
 		// credentials rather than letting bcrypt fail on an empty hash (which
 		// returns ErrHashTooShort, not ErrMismatchedHashAndPassword).
 		return Session{}, ErrInvalidCredentials
@@ -225,7 +227,7 @@ func (s *Service) RequestMagicLink(ctx context.Context, email string) error {
 // CompleteMagicLink validates a single-use magic-link token, ensures an account
 // exists for the token's email (creating a passwordless one on first use), marks
 // the email verified, consumes the token, and returns a session JWT. It ignores
-// any caller session — the token alone decides identity.
+// any caller session: the token alone decides identity.
 //
 // When the token carries an org_invitation_id (invite branch), the new or
 // existing account joins the invited org with its role; no default org is
@@ -265,7 +267,7 @@ func (s *Service) CompleteMagicLink(ctx context.Context, token, reportingTimezon
 	}
 
 	// token_hash is unique, so the lookup above is purpose-agnostic. Gate on
-	// purpose here so this endpoint only redeems login and invite tokens — a
+	// purpose here so this endpoint only redeems login and invite tokens; a
 	// token minted for any other purpose (e.g. a future password-change flow)
 	// is rejected rather than silently consumed as a login.
 	var isInvite bool
@@ -620,7 +622,7 @@ func (s *Service) generateJWT(id string) (string, error) {
 
 // issueSession mints an access JWT + a fresh-family refresh token using the
 // pool-backed queries, as a standalone insert. For callers issuing a session
-// outside any provisioning transaction — currently only password sign-in.
+// outside any provisioning transaction, currently only password sign-in.
 // (Magic link and OAuth issue inside their provisioning tx via issueSessionTx.)
 func (s *Service) issueSession(ctx context.Context, customerID string) (Session, error) {
 	return s.issueSessionTx(ctx, s.write, customerID, "")
@@ -651,7 +653,7 @@ func (s *Service) issueSessionTx(ctx context.Context, w *dbwrite.Queries, custom
 //
 // TODO(refresh-token-pruning): refresh_tokens grows unbounded. Rotation inserts a
 // new row on every refresh (~daily per active user, given a 24h access TTL) and
-// only marks the predecessor consumed_at — its expires_at stays ~90 days out, so
+// only marks the predecessor consumed_at; its expires_at stays ~90 days out, so
 // nothing reaps it. Add a periodic prune (e.g. in the scheduler worker, which
 // needs a write pool wired in) deleting rows that can no longer be presented:
 //
@@ -689,9 +691,9 @@ func (s *Service) createRefreshToken(ctx context.Context, w *dbwrite.Queries, cu
 // rotating (consuming) the presented token. It implements reuse-detection: a
 // token that was ALREADY consumed being presented again means the chain was
 // replayed (a leaked/stolen token, or a buggy client double-refreshing), so the
-// whole rotation family is revoked and the request rejected — neither the
-// attacker nor the legitimate client can keep refreshing, forcing a fresh
-// sign-in. Returns ErrInvalidToken for unknown/expired/revoked/reused tokens.
+// whole rotation family is revoked and the request rejected. Neither the
+// attacker nor the legitimate client can refresh again; both must sign in
+// afresh. Returns ErrInvalidToken for unknown/expired/revoked/reused tokens.
 func (s *Service) RefreshSession(ctx context.Context, refreshToken string) (Session, error) {
 	tx, err := s.pgW.Begin(ctx)
 	if err != nil {
@@ -824,7 +826,7 @@ func (s *Service) autoJoinOnRefresh(ctx context.Context, customerID, provenDomai
 	}
 }
 
-// RevokeSession revokes the rotation family of the presented refresh token —
+// RevokeSession revokes the rotation family of the presented refresh token:
 // the sign-out path. It is intentionally forgiving: an unknown, expired, or
 // already-revoked token revokes nothing and still returns nil, so logging out
 // with a stale token never surfaces an error to the client.
@@ -842,7 +844,7 @@ func (s *Service) RevokeSession(ctx context.Context, refreshToken string) error 
 
 // newActionToken returns a 32-byte cryptographically-random token, hex-encoded
 // (64 chars). This is the sole secret an attacker would need to redeem a
-// magic link, so it must come from crypto/rand —
+// magic link, so it must come from crypto/rand,
 // not a monotonic ID generator like xid.
 func newActionToken() (string, error) {
 	b := make([]byte, 32)
