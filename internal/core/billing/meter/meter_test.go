@@ -218,8 +218,8 @@ func plus(a, b []int64) []int64 {
 	return out
 }
 
-// The current plan's placeholder tiers split 2.1M events above a 100k allowance into
-// 1.9M in tier 1 and 100k in tier 2 (see entitlement's catalog constants).
+// The current plan's tiers split 2.1M events above a 100k allowance into 1.9M in
+// tier 1 and 100k in tier 2 (see entitlement's catalog).
 func TestStatesTheWindowsTiers(t *testing.T) {
 	f := setup(t)
 	start, end := d(10, 3).Add(2*time.Hour), d(11, 3).Add(2*time.Hour)

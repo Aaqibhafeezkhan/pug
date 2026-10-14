@@ -392,6 +392,12 @@ type GetBillingStatusResponse struct {
 	// When the provider bills next: the MONEY's period, not the usage period above.
 	// Absent when there is no live subscription.
 	CurrentPeriodEnd *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=current_period_end,json=currentPeriodEnd" json:"current_period_end,omitempty"`
+	// When the provider's current billing period began, the start of the period
+	// current_period_end closes. Absent when there is no live subscription or the
+	// provider sent no start. The meter counts the period in whole UTC days, from
+	// this instant's day up to, not including, current_period_end's, except that
+	// after a change of subscription it skips the days the previous one counted.
+	CurrentPeriodStart *timestamppb.Timestamp `protobuf:"bytes,17,opt,name=current_period_start,json=currentPeriodStart" json:"current_period_start,omitempty"`
 	// When the provider stops waiting for the failed card -- the banner's "update
 	// your card by". Past it the provider holds the subscription (still PAST_DUE,
 	// this field then absent) or cancels it, and this can read as past until pug sees
@@ -509,6 +515,13 @@ func (x *GetBillingStatusResponse) GetSubscriptionStatus() SubscriptionStatus {
 func (x *GetBillingStatusResponse) GetCurrentPeriodEnd() *timestamppb.Timestamp {
 	if x != nil {
 		return x.CurrentPeriodEnd
+	}
+	return nil
+}
+
+func (x *GetBillingStatusResponse) GetCurrentPeriodStart() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CurrentPeriodStart
 	}
 	return nil
 }
@@ -1054,7 +1067,7 @@ const file_dashboard_billing_v1_billing_proto_rawDesc = "" +
 	"upToEvents\x12\x16\n" +
 	"\x06events\x18\x02 \x01(\x03R\x06events\x12\x1f\n" +
 	"\vfrom_events\x18\x03 \x01(\x03R\n" +
-	"fromEvents\"\xc8\a\n" +
+	"fromEvents\"\x96\b\n" +
 	"\x18GetBillingStatusResponse\x12'\n" +
 	"\x0fbilling_enabled\x18\x01 \x01(\bR\x0ebillingEnabled\x12.\n" +
 	"\x04plan\x18\x02 \x01(\v2\x1a.dashboard.billing.v1.PlanR\x04plan\x12;\n" +
@@ -1066,7 +1079,8 @@ const file_dashboard_billing_v1_billing_proto_rawDesc = "" +
 	"period_end\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tperiodEnd\x12Y\n" +
 	"\x13subscription_status\x18\t \x01(\x0e2(.dashboard.billing.v1.SubscriptionStatusR\x12subscriptionStatus\x12H\n" +
 	"\x12current_period_end\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\x10currentPeriodEnd\x12K\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\x10currentPeriodEnd\x12L\n" +
+	"\x14current_period_start\x18\x11 \x01(\v2\x1a.google.protobuf.TimestampR\x12currentPeriodStart\x12K\n" +
 	"\x14grace_period_ends_at\x18\x10 \x01(\v2\x1a.google.protobuf.TimestampR\x11gracePeriodEndsAt\x12 \n" +
 	"\vpurchasable\x18\v \x01(\bR\vpurchasable\x12B\n" +
 	"\x0eretention_days\x18\r \x01(\v2\x1b.google.protobuf.Int64ValueR\rretentionDays\x12\x1e\n" +
@@ -1174,29 +1188,30 @@ var file_dashboard_billing_v1_billing_proto_depIdxs = []int32{
 	17, // 6: dashboard.billing.v1.GetBillingStatusResponse.period_end:type_name -> google.protobuf.Timestamp
 	1,  // 7: dashboard.billing.v1.GetBillingStatusResponse.subscription_status:type_name -> dashboard.billing.v1.SubscriptionStatus
 	17, // 8: dashboard.billing.v1.GetBillingStatusResponse.current_period_end:type_name -> google.protobuf.Timestamp
-	17, // 9: dashboard.billing.v1.GetBillingStatusResponse.grace_period_ends_at:type_name -> google.protobuf.Timestamp
-	16, // 10: dashboard.billing.v1.GetBillingStatusResponse.retention_days:type_name -> google.protobuf.Int64Value
-	5,  // 11: dashboard.billing.v1.GetBillingStatusResponse.tier_usage:type_name -> dashboard.billing.v1.TierUsage
-	17, // 12: dashboard.billing.v1.GetBillingStatusResponse.tier_usage_as_of:type_name -> google.protobuf.Timestamp
-	2,  // 13: dashboard.billing.v1.CreateCheckoutSessionRequest.theme:type_name -> dashboard.billing.v1.CheckoutTheme
-	16, // 14: dashboard.billing.v1.PlanOption.included_events:type_name -> google.protobuf.Int64Value
-	16, // 15: dashboard.billing.v1.PlanOption.retention_days:type_name -> google.protobuf.Int64Value
-	14, // 16: dashboard.billing.v1.ListPlansResponse.plans:type_name -> dashboard.billing.v1.PlanOption
-	3,  // 17: dashboard.billing.v1.BillingService.GetBillingStatus:input_type -> dashboard.billing.v1.GetBillingStatusRequest
-	7,  // 18: dashboard.billing.v1.BillingService.CreateCheckoutSession:input_type -> dashboard.billing.v1.CreateCheckoutSessionRequest
-	9,  // 19: dashboard.billing.v1.BillingService.ConfirmCheckout:input_type -> dashboard.billing.v1.ConfirmCheckoutRequest
-	11, // 20: dashboard.billing.v1.BillingService.CreatePortalSession:input_type -> dashboard.billing.v1.CreatePortalSessionRequest
-	13, // 21: dashboard.billing.v1.BillingService.ListPlans:input_type -> dashboard.billing.v1.ListPlansRequest
-	6,  // 22: dashboard.billing.v1.BillingService.GetBillingStatus:output_type -> dashboard.billing.v1.GetBillingStatusResponse
-	8,  // 23: dashboard.billing.v1.BillingService.CreateCheckoutSession:output_type -> dashboard.billing.v1.CreateCheckoutSessionResponse
-	10, // 24: dashboard.billing.v1.BillingService.ConfirmCheckout:output_type -> dashboard.billing.v1.ConfirmCheckoutResponse
-	12, // 25: dashboard.billing.v1.BillingService.CreatePortalSession:output_type -> dashboard.billing.v1.CreatePortalSessionResponse
-	15, // 26: dashboard.billing.v1.BillingService.ListPlans:output_type -> dashboard.billing.v1.ListPlansResponse
-	22, // [22:27] is the sub-list for method output_type
-	17, // [17:22] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	17, // 9: dashboard.billing.v1.GetBillingStatusResponse.current_period_start:type_name -> google.protobuf.Timestamp
+	17, // 10: dashboard.billing.v1.GetBillingStatusResponse.grace_period_ends_at:type_name -> google.protobuf.Timestamp
+	16, // 11: dashboard.billing.v1.GetBillingStatusResponse.retention_days:type_name -> google.protobuf.Int64Value
+	5,  // 12: dashboard.billing.v1.GetBillingStatusResponse.tier_usage:type_name -> dashboard.billing.v1.TierUsage
+	17, // 13: dashboard.billing.v1.GetBillingStatusResponse.tier_usage_as_of:type_name -> google.protobuf.Timestamp
+	2,  // 14: dashboard.billing.v1.CreateCheckoutSessionRequest.theme:type_name -> dashboard.billing.v1.CheckoutTheme
+	16, // 15: dashboard.billing.v1.PlanOption.included_events:type_name -> google.protobuf.Int64Value
+	16, // 16: dashboard.billing.v1.PlanOption.retention_days:type_name -> google.protobuf.Int64Value
+	14, // 17: dashboard.billing.v1.ListPlansResponse.plans:type_name -> dashboard.billing.v1.PlanOption
+	3,  // 18: dashboard.billing.v1.BillingService.GetBillingStatus:input_type -> dashboard.billing.v1.GetBillingStatusRequest
+	7,  // 19: dashboard.billing.v1.BillingService.CreateCheckoutSession:input_type -> dashboard.billing.v1.CreateCheckoutSessionRequest
+	9,  // 20: dashboard.billing.v1.BillingService.ConfirmCheckout:input_type -> dashboard.billing.v1.ConfirmCheckoutRequest
+	11, // 21: dashboard.billing.v1.BillingService.CreatePortalSession:input_type -> dashboard.billing.v1.CreatePortalSessionRequest
+	13, // 22: dashboard.billing.v1.BillingService.ListPlans:input_type -> dashboard.billing.v1.ListPlansRequest
+	6,  // 23: dashboard.billing.v1.BillingService.GetBillingStatus:output_type -> dashboard.billing.v1.GetBillingStatusResponse
+	8,  // 24: dashboard.billing.v1.BillingService.CreateCheckoutSession:output_type -> dashboard.billing.v1.CreateCheckoutSessionResponse
+	10, // 25: dashboard.billing.v1.BillingService.ConfirmCheckout:output_type -> dashboard.billing.v1.ConfirmCheckoutResponse
+	12, // 26: dashboard.billing.v1.BillingService.CreatePortalSession:output_type -> dashboard.billing.v1.CreatePortalSessionResponse
+	15, // 27: dashboard.billing.v1.BillingService.ListPlans:output_type -> dashboard.billing.v1.ListPlansResponse
+	23, // [23:28] is the sub-list for method output_type
+	18, // [18:23] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_dashboard_billing_v1_billing_proto_init() }

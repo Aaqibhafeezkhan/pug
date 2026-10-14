@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/log/global"
 )
 
 const (
@@ -70,12 +69,12 @@ func TestResolveOtelModeIgnoresPugOtel(t *testing.T) {
 func TestDoSetupWithoutExport_installsNoopProviders(t *testing.T) {
 	prevTracer := otel.GetTracerProvider()
 	prevMeter := otel.GetMeterProvider()
-	prevLogger := global.GetLoggerProvider()
+	prevLogger := otel.GetLoggerProvider()
 	prevSlog := slog.Default()
 	t.Cleanup(func() {
 		otel.SetTracerProvider(prevTracer)
 		otel.SetMeterProvider(prevMeter)
-		global.SetLoggerProvider(prevLogger)
+		otel.SetLoggerProvider(prevLogger)
 		slog.SetDefault(prevSlog)
 	})
 

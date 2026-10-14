@@ -326,3 +326,45 @@ func TestGetBillingStatusShowsNoGraceDeadlineWithBillingOff(t *testing.T) {
 		t.Errorf("grace_period_ends_at = %v with billing off, want absent", got.GetGracePeriodEndsAt())
 	}
 }
+
+// Both ends of the money's period, so a client can draw the whole billing month, and
+// neither — never a zero timestamp — once nothing live is billing.
+func TestGetBillingStatusReportsTheBillingPeriod(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	pg := testutil.SetupPostgres(t)
+	srv := newServer(t, pg, true)
+	orgID := seedOrg(t, pg, time.Date(2025, 3, 10, 0, 0, 0, 0, time.UTC))
+	start := time.Now().UTC().Truncate(time.Second).AddDate(0, 0, -3)
+	end := start.AddDate(0, 1, 0)
+	if _, err := pg.PgW.Exec(t.Context(),
+		`insert into billing_subscriptions (currency, current_period_end, current_period_start, id, org_id,
+		   plan_slug, price_cents, provider, provider_customer_id, provider_status, provider_sub_id,
+		   provider_updated_at, status)
+		 values ('USD', $1, $2, $3, $4, $5, 100, 'dodo', 'cus_1', 'active', 'sub_1', now(), 'active')`,
+		end, start, xid.New().String(), orgID, entitlement.SlugUsage); err != nil {
+		t.Fatalf("seed subscription: %v", err)
+	}
+
+	got := getStatus(t, srv, orgID)
+	if !got.GetCurrentPeriodStart().AsTime().Equal(start) || !got.GetCurrentPeriodEnd().AsTime().Equal(end) {
+		t.Errorf("billing period = [%v, %v), want [%s, %s)",
+			got.GetCurrentPeriodStart(), got.GetCurrentPeriodEnd(), start, end)
+	}
+	got = getStatus(t, newServer(t, pg, false), orgID)
+	if got.GetCurrentPeriodStart() != nil || got.GetCurrentPeriodEnd() != nil {
+		t.Errorf("billing period = [%v, %v) with billing off, want absent",
+			got.GetCurrentPeriodStart(), got.GetCurrentPeriodEnd())
+	}
+
+	if _, err := pg.PgW.Exec(t.Context(),
+		`update billing_subscriptions set provider_status = 'cancelled', status = 'cancelled'`); err != nil {
+		t.Fatalf("cancel subscription: %v", err)
+	}
+	if got := getStatus(t, srv, orgID); got.GetCurrentPeriodStart() != nil || got.GetCurrentPeriodEnd() != nil {
+		t.Errorf("billing period = [%v, %v) with no live subscription, want absent",
+			got.GetCurrentPeriodStart(), got.GetCurrentPeriodEnd())
+	}
+}

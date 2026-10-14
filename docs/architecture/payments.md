@@ -877,7 +877,11 @@ configured and unconfigured. It keeps the viewer floor. Plan changes and cancell
 portal; no `ChangePlan` RPC in this slice. Usage billing added `tier_usage` and
 `tier_usage_as_of` to it: what was last stated to the provider (§4.2). Dunning
 added `grace_period_ends_at`: set only beside `PAST_DUE` inside a grace window, and
-absent otherwise, a hold that follows one included (§11).
+absent otherwise, a hold that follows one included (§11). The dashboard's billing-month
+usage chart added `current_period_start`, the period's other end, absent alongside
+`current_period_end`: the meter counts the period in whole UTC days, from the start's
+day up to, not including, the end's, except that after a change of subscription it
+skips the days the previous one counted (§4.2, Window).
 
 ### 12.1 Confirming the buyer who came back
 

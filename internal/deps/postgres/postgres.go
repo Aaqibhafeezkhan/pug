@@ -23,8 +23,8 @@ func createPool(ctx context.Context, addr string) (*pgxpool.Pool, error) {
 		return nil, err
 	}
 
-	// otelpgx names spans by the SQL's first word by default, which is "--" for
-	// every sqlc query (they open with "-- name: X"), so keep the full statement.
+	// The full statement starts with sqlc's "-- name: X" header, so the span name
+	// says which query ran; otelpgx's default would be only the verb ("SELECT").
 	dbPoolConfig.ConnConfig.Tracer = otelpgx.NewTracer(otelpgx.WithFullSQLInSpanName(), otelpgx.WithQuerySpanNamePrefix())
 
 	pool, err := pgxpool.NewWithConfig(ctx, dbPoolConfig)

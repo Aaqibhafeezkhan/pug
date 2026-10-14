@@ -22,8 +22,7 @@ first cut, since `occur_time` has no lower bound. The dry run shows them first.
 An org's length is the first of these that is set:
 
 1. `retention_days_override`, set with `pug billing set --retention-days`.
-2. With billing on, 5 years for a paying org and 1 year for a free one. Both are
-   placeholders.
+2. With billing on, 5 years for a paying org and 1 year for a free one.
 3. `PUG_RETENTION_DAYS`, the default with billing off. Unset keeps everything.
    The server, `pug billing`, the billing crons and later the job read it, so
    set it on each.
@@ -43,10 +42,10 @@ cut stays gone.
 
 What phase 1 changed in billing:
 
-1. `placeholderRetentionDays` is `5 * RetentionYearDays`, 1,825 days. It was
-   a year, and changed in place because no org held the plan.
-2. A free org gets `freeRetentionDays`, 1 year, also a placeholder, not the
-   current plan's `RetentionDays`.
+1. `usage-2026-10`'s `RetentionDays` is `5 * RetentionYearDays`, 1,825 days. It
+   was a year, and changed in place because no org held the plan.
+2. A free org gets `freeRetentionDays`, 1 year, not the current plan's
+   `RetentionDays`.
 3. The override applies on its own: billing on or off, with or without a deal.
    `set --plan free` without `--until` keeps it. Only `--retention-days 0` and
    `pug billing clear` remove it. It outlives a deal, so the operator clears it

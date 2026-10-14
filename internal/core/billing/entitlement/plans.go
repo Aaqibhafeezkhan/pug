@@ -58,22 +58,8 @@ const (
 // somebody bought.
 const RetentionYearDays = 365
 
-// PLACEHOLDERS: the commercial split is not decided yet. Each number is one
-// constant, so setting it is a one-line change here plus the matching meters on the
-// provider's product, and TestCatalogIsPinned's expectation. Once the plan is sold
-// they are fixed (see catalog).
-const (
-	placeholderFreeEvents    = 100_000
-	placeholderTier1UpTo     = 2_000_000
-	placeholderTier2UpTo     = 15_000_000
-	placeholderTier3UpTo     = 50_000_000
-	placeholderTier4UpTo     = 100_000_000
-	placeholderTier5UpTo     = 250_000_000
-	placeholderRetentionDays = 5 * RetentionYearDays
-)
-
 // freeRetentionDays is what an org with no live subscription keeps, whatever the
-// plan on sale keeps. Also a placeholder.
+// plan on sale keeps.
 const freeRetentionDays = RetentionYearDays
 
 // catalog is every usage plan pug has ever sold, newest last. Once any org holds a
@@ -83,14 +69,11 @@ const freeRetentionDays = RetentionYearDays
 // and retires the old.
 var catalog = []Plan{
 	{
-		Slug:        SlugUsage,
-		DisplayName: "Pay as you go",
-		FreeEvents:  placeholderFreeEvents,
-		TierUpTo: []int64{
-			placeholderTier1UpTo, placeholderTier2UpTo, placeholderTier3UpTo,
-			placeholderTier4UpTo, placeholderTier5UpTo,
-		},
-		RetentionDays: placeholderRetentionDays,
+		Slug:          SlugUsage,
+		DisplayName:   "Pay as you go",
+		FreeEvents:    100_000,
+		TierUpTo:      []int64{2_000_000, 15_000_000, 50_000_000, 100_000_000, 250_000_000},
+		RetentionDays: 5 * RetentionYearDays,
 	},
 }
 

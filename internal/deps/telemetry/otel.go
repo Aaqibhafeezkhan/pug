@@ -13,7 +13,6 @@ import (
 	"github.com/pug-sh/pug/internal/slogx"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/propagation"
 )
 
@@ -99,7 +98,7 @@ func doSetupSDK(ctx context.Context) (func(context.Context) error, error) {
 	// Set globals now that all providers initialized successfully.
 	otel.SetTracerProvider(tracerProvider)
 	otel.SetMeterProvider(meterProvider)
-	global.SetLoggerProvider(loggerProvider)
+	otel.SetLoggerProvider(loggerProvider)
 
 	serviceName := os.Getenv("OTEL_SERVICE_NAME")
 	if serviceName == "" {
