@@ -132,11 +132,12 @@ Two read-only accounts are seeded, plus an admin if you ask for one:
 - `snoop@pug.sh` is a viewer with no password; open `/demo` with
   `PUG_DEMO_ENABLED=true` to sign in as it.
 - `admin@pug.example` is the demo org's admin, seeded only when
-  `PUG_DEMO_ADMIN_PASSWORD` is set (6 characters to 72 bytes, no surrounding
-  whitespace), with that password. No one can receive a sign-in link at that
-  address. Nothing logs the password, and later runs never change it, so change
-  it in the dashboard. A default `pug seed` resets the database, though, and so
-  recreates the admin from the current value.
+  `PUG_DEMO_ADMIN_PASSWORD` is set (16 characters to 72 bytes, no surrounding
+  whitespace), with that password. The address can't receive mail. Nothing logs
+  the password, and later runs never change it, so change it in the dashboard,
+  to 16 characters or more, and update the variable to match, since the seeder
+  restores the admin's role only while they match. A default `pug seed` resets
+  the database, though, and so recreates the admin from the current value.
 
 For a live stream of traffic instead of a one-shot backfill, set
 `PUG_DEMO_ENABLED=true`: `./bin/pug dev` then also runs the demo worker. It

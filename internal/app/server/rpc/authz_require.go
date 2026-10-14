@@ -8,6 +8,7 @@ import (
 	"connectrpc.com/connect"
 
 	"github.com/pug-sh/pug/internal/apperr"
+	coreauth "github.com/pug-sh/pug/internal/core/auth"
 	"github.com/pug-sh/pug/internal/core/authz"
 	coreorgs "github.com/pug-sh/pug/internal/core/orgs"
 	"github.com/pug-sh/pug/internal/deps/telemetry"
@@ -59,7 +60,7 @@ func requirePermission(
 	}
 	// Anyone can sign in as the demo viewer, and the demo user's password was once
 	// published, so both are viewers in every org, whatever role is stored.
-	if isDemoAccount(ctx) {
+	if coreauth.IsDemoAccount(principal.Customer.Email) {
 		role = coreorgs.RoleViewer
 	}
 

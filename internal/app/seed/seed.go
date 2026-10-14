@@ -33,7 +33,7 @@ type Options struct {
 // set).
 func Run(ctx context.Context, opts Options) error {
 	// A bad demo admin password fails here, before the reset drops anything.
-	if _, err := pgseed.AdminPasswordFromEnv(ctx); err != nil {
+	if _, err := pgseed.AdminPasswordFromEnv(); err != nil {
 		return err
 	}
 	// Clear the existing demo rows only on the NoReset path: the reset path drops
