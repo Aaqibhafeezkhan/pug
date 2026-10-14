@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/jackc/pgx/v5/pgtype"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 
 	coreprojects "github.com/pug-sh/pug/internal/core/projects"
@@ -15,93 +16,45 @@ import (
 	"github.com/pug-sh/pug/internal/gen/repo/dbwrite"
 )
 
+// roToRPCMsg is compared as a whole message, so the test fails if the mapper
+// starts setting another field. The input row holds an FCM service-account
+// JSON with a private key, and no output field may carry it.
 func TestROToRPCMsg(t *testing.T) {
-	tests := []struct {
-		name  string
-		input dbread.Project
-	}{
-		{
-			name: "converts all fields",
-			input: dbread.Project{
-				ID:             "proj_001",
-				OrgID:          "org_abc",
-				DisplayName:    "My Project",
-				FcmServiceJson: postgres.NewText(`{"type":"service_account"}`),
-			},
-		},
-		{
-			name: "handles empty FCM service JSON",
-			input: dbread.Project{
-				ID:             "proj_002",
-				OrgID:          "org_xyz",
-				DisplayName:    "Another Project",
-				FcmServiceJson: pgtype.Text{Valid: false},
-			},
-		},
+	in := dbread.Project{
+		ID:                "proj_001",
+		OrgID:             "org_abc",
+		DisplayName:       "My Project",
+		ReportingTimezone: "Asia/Kolkata",
+		DefaultTheme:      "pug#dark",
+		FcmServiceJson:    postgres.NewText(`{"type":"service_account","private_key":"-----BEGIN PRIVATE KEY-----"}`),
+	}
+	want := &projectsv1.Project{
+		DisplayName:       proto.String("My Project"),
+		Id:                proto.String("proj_001"),
+		OrgId:             proto.String("org_abc"),
+		ReportingTimezone: proto.String("Asia/Kolkata"),
+		DefaultTheme:      proto.String("pug#dark"),
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			msg := roToRPCMsg(tt.input)
-
-			if msg.GetId() != tt.input.ID {
-				t.Errorf("Id = %q, want %q", msg.GetId(), tt.input.ID)
-			}
-			if msg.GetOrgId() != tt.input.OrgID {
-				t.Errorf("OrgId = %q, want %q", msg.GetOrgId(), tt.input.OrgID)
-			}
-			if msg.GetDisplayName() != tt.input.DisplayName {
-				t.Errorf("DisplayName = %q, want %q", msg.GetDisplayName(), tt.input.DisplayName)
-			}
-			if msg.GetFcmServiceJson() != tt.input.FcmServiceJson.String {
-				t.Errorf("FcmServiceJson = %q, want %q", msg.GetFcmServiceJson(), tt.input.FcmServiceJson.String)
-			}
-		})
+	if diff := cmp.Diff(want, roToRPCMsg(in), protocmp.Transform()); diff != "" {
+		t.Errorf("roToRPCMsg mismatch (-want +got):\n%s", diff)
 	}
 }
 
-func TestWToRPCMsg(t *testing.T) {
-	tests := []struct {
-		name  string
-		input dbwrite.Project
-	}{
-		{
-			name: "converts all fields",
-			input: dbwrite.Project{
-				ID:             "proj_w01",
-				OrgID:          "org_w_abc",
-				DisplayName:    "Write Project",
-				FcmServiceJson: postgres.NewText(`{"project_id":"123"}`),
-			},
-		},
-		{
-			name: "handles invalid FCM text",
-			input: dbwrite.Project{
-				ID:             "proj_w02",
-				OrgID:          "org_w_xyz",
-				DisplayName:    "Minimal Project",
-				FcmServiceJson: pgtype.Text{Valid: false},
-			},
-		},
+// wToRPCMsg leans on dbread.Project and dbwrite.Project being the same row
+// generated twice. Pin that it maps identically.
+func TestWToRPCMsgMatchesRead(t *testing.T) {
+	w := dbwrite.Project{
+		ID:                "proj_w01",
+		OrgID:             "org_w_abc",
+		DisplayName:       "Write Project",
+		ReportingTimezone: "UTC",
+		DefaultTheme:      "https://themes.pug.sh/linen/theme.json",
+		FcmServiceJson:    postgres.NewText(`{"project_id":"123"}`),
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			msg := wToRPCMsg(tt.input)
-
-			if msg.GetId() != tt.input.ID {
-				t.Errorf("Id = %q, want %q", msg.GetId(), tt.input.ID)
-			}
-			if msg.GetOrgId() != tt.input.OrgID {
-				t.Errorf("OrgId = %q, want %q", msg.GetOrgId(), tt.input.OrgID)
-			}
-			if msg.GetDisplayName() != tt.input.DisplayName {
-				t.Errorf("DisplayName = %q, want %q", msg.GetDisplayName(), tt.input.DisplayName)
-			}
-			if msg.GetFcmServiceJson() != tt.input.FcmServiceJson.String {
-				t.Errorf("FcmServiceJson = %q, want %q", msg.GetFcmServiceJson(), tt.input.FcmServiceJson.String)
-			}
-		})
+	if diff := cmp.Diff(roToRPCMsg(dbread.Project(w)), wToRPCMsg(w), protocmp.Transform()); diff != "" {
+		t.Errorf("wToRPCMsg differs from roToRPCMsg (-read +write):\n%s", diff)
 	}
 }
 
@@ -129,7 +82,7 @@ func TestApiKeyToRPCMsg(t *testing.T) {
 			wantKnd: projectsv1.ApiKeyKind_API_KEY_KIND_PUBLIC,
 		},
 		{
-			// The token of a private key is its digest — returning it would leak the
+			// The token of a private key is its digest. Returning it would leak the
 			// stored secret, and it is useless to the client either way.
 			name: "private key never returns its token",
 			input: dbread.ApiKey{
