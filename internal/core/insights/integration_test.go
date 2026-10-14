@@ -598,7 +598,7 @@ func TestIntegration(t *testing.T) {
 		if rows[2].Value != 1 {
 			t.Errorf("step 2 (purchase): expected 1 user, got %v", rows[2].Value)
 		}
-		// Step 0 has no timing (entry step) — Timing must be nil.
+		// Step 0 has no timing (entry step): Timing must be nil.
 		if rows[0].Timing != nil {
 			t.Errorf("step 0 timing should be nil, got %+v", rows[0].Timing)
 		}
@@ -954,7 +954,7 @@ func TestIntegration(t *testing.T) {
 			// Baseline (no scope): the seeded data DOES produce transitions, including
 			// the heartbeat-noise edges in session A. Asserting this first proves the
 			// scoped 0-link result below is the scope filtering events down to one per
-			// session — not simply an empty dataset (the gap this test used to have).
+			// session, not simply an empty dataset (the gap this test used to have).
 			baseline, err := insights.ExecuteQuery(ctx, executor, scopeProjectID,
 				userFlowReq(&insightsv1.UserFlowQuery{}), time.Now())
 			if err != nil {
@@ -1264,7 +1264,7 @@ func TestIntegration(t *testing.T) {
 
 	// A map insight executes as a top K over $country. The two things worth proving end to end are
 	// that it answers in top_k rows keyed by country, and that the day-aligned (rollup) and
-	// misaligned (raw) windows agree — the rewrite is the only thing standing between the two.
+	// misaligned (raw) windows agree; the rewrite is the only thing standing between the two.
 	t.Run("map", func(t *testing.T) {
 		mapReq := func(metric insightsv1.AggregationType, from, to time.Time) *insightsv1.QueryRequest {
 			return &insightsv1.QueryRequest{
@@ -1288,7 +1288,7 @@ func TestIntegration(t *testing.T) {
 			out := map[string]float64{}
 			for _, row := range rows {
 				if row.GetIsOthers() {
-					t.Errorf("map returned an $others row (%v) — it cannot be drawn on a map", row.GetValue())
+					t.Errorf("map returned an $others row (%v): it cannot be drawn on a map", row.GetValue())
 					continue
 				}
 				out[row.GetDimensionValue()] = row.GetValue()
@@ -1298,7 +1298,7 @@ func TestIntegration(t *testing.T) {
 
 		dayStart := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 		dayEnd := time.Date(2024, 1, 4, 0, 0, 0, 0, time.UTC)
-		// Every seeded event is at 12:00, so a 06:00 start selects the same events — it only
+		// Every seeded event is at 12:00, so a 06:00 start selects the same events; it only
 		// misaligns the window, which is what forces the raw builder.
 		midDayStart := time.Date(2024, 1, 1, 6, 0, 0, 0, time.UTC)
 
@@ -1348,7 +1348,7 @@ func TestIntegration(t *testing.T) {
 	t.Run("rollup_parity_trends_week_unique_users", func(t *testing.T) {
 		// WEEK granularity over a window where alice appears on days 1/2/3 (all in
 		// the same ISO week) forces the rollup's per-day uniq_state to merge across
-		// days within one bucket — the cross-day uniqMerge that DAY-granularity
+		// days within one bucket: the cross-day uniqMerge that DAY-granularity
 		// tests never exercise. Parity with the raw builder proves the merge is
 		// correct, and the per-country totals prove the repeat user collapses to 1.
 		req := &insightsv1.QueryRequest{
@@ -1484,11 +1484,11 @@ func TestIntegration(t *testing.T) {
 			return resp.GetSegmentation().GetTotal(), raw
 		}
 
-		// TOTAL: rollup keeps the duplicate (2), raw dedups it (1) — documented drift.
+		// TOTAL: rollup keeps the duplicate (2), raw dedups it (1): documented drift.
 		if rollup, raw := totals(insightsv1.AggregationType_AGGREGATION_TYPE_TOTAL); rollup != 2 || raw != 1 {
 			t.Errorf("TOTAL rollup=%v raw=%v, want rollup=2 raw=1 (accepted over-count; see rollup.go canUseEventRollup)", rollup, raw)
 		}
-		// UNIQUE_USERS: immune — uniqState on distinct_id is idempotent.
+		// UNIQUE_USERS: immune: uniqState on distinct_id is idempotent.
 		if rollup, raw := totals(insightsv1.AggregationType_AGGREGATION_TYPE_UNIQUE_USERS); rollup != raw || rollup != 1 {
 			t.Errorf("UNIQUE_USERS rollup=%v raw=%v, want both=1 (dedup-immune)", rollup, raw)
 		}
@@ -1496,42 +1496,24 @@ func TestIntegration(t *testing.T) {
 
 	// ---- Session insights (issue #161) ----------------------------------------
 	// One shared seed across the session subtests; D straddles the Jan1/Jan2 boundary.
-	const sessionProjectID = "proj_session_rollup"
+	const sessionProjectID = "proj_session"
 	seedSessionEvents(t, ctx, ch, sessionProjectID)
 	fullFrom := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	fullTo := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
 
-	t.Run("session_rollup_parity_all_metrics", func(t *testing.T) {
-		// The load-bearing check: every metric returns identical numbers from the
-		// rollup fast path and the raw builder over the same data + window.
-		for _, m := range []insightsv1.SessionMetric{
-			insightsv1.SessionMetric_SESSION_METRIC_SESSIONS,
-			insightsv1.SessionMetric_SESSION_METRIC_AVG_DURATION,
-			insightsv1.SessionMetric_SESSION_METRIC_BOUNCE_RATE,
-		} {
-			assertSessionTrendsParity(t, ctx, executor, sessionProjectID, sessionTrendsReq(m, "", fullFrom, fullTo))
-			assertSessionSegParity(t, ctx, executor, sessionProjectID, sessionSegReq(m, fullFrom, fullTo))
-		}
-		// ENTRY/EXIT are trends + one breakdown only.
-		assertSessionTrendsParity(t, ctx, executor, sessionProjectID,
-			sessionTrendsReq(insightsv1.SessionMetric_SESSION_METRIC_ENTRY, "$url", fullFrom, fullTo))
-		assertSessionTrendsParity(t, ctx, executor, sessionProjectID,
-			sessionTrendsReq(insightsv1.SessionMetric_SESSION_METRIC_EXIT, "$url", fullFrom, fullTo))
-	})
-
 	t.Run("session_scalar_numeric", func(t *testing.T) {
 		// SESSIONS: A,B,C,D all start in [Jan1,Jan3) → 4.
-		if got := assertSessionSegParity(t, ctx, executor, sessionProjectID,
+		if got := sessionSegTotal(t, ctx, executor, sessionProjectID,
 			sessionSegReq(insightsv1.SessionMetric_SESSION_METRIC_SESSIONS, fullFrom, fullTo)); got != 4 {
 			t.Errorf("SESSIONS = %v, want 4", got)
 		}
 		// AVG_DURATION: (300 + 0 + 1800 + 3600) / 4 = 1425s.
-		if got := assertSessionSegParity(t, ctx, executor, sessionProjectID,
+		if got := sessionSegTotal(t, ctx, executor, sessionProjectID,
 			sessionSegReq(insightsv1.SessionMetric_SESSION_METRIC_AVG_DURATION, fullFrom, fullTo)); got != 1425 {
 			t.Errorf("AVG_DURATION = %v, want 1425", got)
 		}
 		// BOUNCE_RATE: only B is single-event → 1/4 = 25%.
-		if got := assertSessionSegParity(t, ctx, executor, sessionProjectID,
+		if got := sessionSegTotal(t, ctx, executor, sessionProjectID,
 			sessionSegReq(insightsv1.SessionMetric_SESSION_METRIC_BOUNCE_RATE, fullFrom, fullTo)); got != 25 {
 			t.Errorf("BOUNCE_RATE = %v, want 25", got)
 		}
@@ -1539,7 +1521,7 @@ func TestIntegration(t *testing.T) {
 
 	t.Run("session_entry_exit_differ", func(t *testing.T) {
 		// ENTRY uses argMin(url, occur_time); EXIT uses argMax. A and D have distinct
-		// first/last pages, so the two metrics must produce different buckets — the
+		// first/last pages, so the two metrics must produce different buckets: the
 		// check that proves entry/exit attribution isn't swapped.
 		entryResp, err := insights.ExecuteQuery(ctx, executor, sessionProjectID,
 			sessionTrendsReq(insightsv1.SessionMetric_SESSION_METRIC_ENTRY, "$url", fullFrom, fullTo), time.Now())
@@ -1568,20 +1550,19 @@ func TestIntegration(t *testing.T) {
 			t.Errorf("EXIT = %v, want %v", exit, wantExit)
 		}
 		if reflect.DeepEqual(entry, exit) {
-			t.Error("ENTRY and EXIT identical — argMin/argMax attribution not exercised")
+			t.Error("ENTRY and EXIT identical: argMin/argMax attribution not exercised")
 		}
 	})
 
 	t.Run("session_boundary_straddle", func(t *testing.T) {
 		// Window [Jan2,Jan3): session D started Jan1 23:30, so it must be EXCLUDED
-		// even though its second event (/y) is at Jan2 00:30 — full-session semantics
+		// even though its second event (/y) is at Jan2 00:30: full-session semantics
 		// key on start, they do not clip a session's events to the window. Only C
-		// (started Jan2 09:00) qualifies. This is the exact case the old raw builder
-		// (occur_time WHERE clip) got wrong; rollup and raw must now agree.
+		// (started Jan2 09:00) qualifies.
 		from := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
 		to := time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC)
 		req := sessionSegReq(insightsv1.SessionMetric_SESSION_METRIC_SESSIONS, from, to)
-		if got := assertSessionSegParity(t, ctx, executor, sessionProjectID, req); got != 1 {
+		if got := sessionSegTotal(t, ctx, executor, sessionProjectID, req); got != 1 {
 			t.Errorf("SESSIONS in [Jan2,Jan3) = %v, want 1 (only C; D excluded by start)", got)
 		}
 		// Entry pages: only C's /a, on Jan2. D's /x and /y must be absent.
@@ -1595,8 +1576,19 @@ func TestIntegration(t *testing.T) {
 		if !reflect.DeepEqual(entry, want) {
 			t.Errorf("boundary entry = %v, want %v (D's /x,/y excluded)", entry, want)
 		}
-		assertSessionTrendsParity(t, ctx, executor, sessionProjectID,
-			sessionTrendsReq(insightsv1.SessionMetric_SESSION_METRIC_ENTRY, "$url", from, to))
+
+		// Window [Jan1,Jan2): D started inside it, so its exit stays /y even
+		// though /y lands after the window closes.
+		exitResp, err := insights.ExecuteQuery(ctx, executor, sessionProjectID,
+			sessionTrendsReq(insightsv1.SessionMetric_SESSION_METRIC_EXIT, "$url", fullFrom, from), time.Now())
+		if err != nil {
+			t.Fatalf("exit ExecuteQuery: %v", err)
+		}
+		exit := flattenSessionTrends(exitResp)
+		wantExit := map[string]float64{"/checkout|2024-01-01": 1, "/home|2024-01-01": 1, "/y|2024-01-01": 1}
+		if !reflect.DeepEqual(exit, wantExit) {
+			t.Errorf("boundary exit = %v, want %v (D keeps /y)", exit, wantExit)
+		}
 	})
 
 	t.Run("session_empty_window", func(t *testing.T) {
@@ -1618,54 +1610,6 @@ func TestIntegration(t *testing.T) {
 			if got := resp.GetSegmentation().GetTotal(); got != 0 {
 				t.Errorf("metric %v on empty window = %v, want 0", m, got)
 			}
-		}
-	})
-
-	t.Run("session_rollup_bounce_duplicate_overcount_documented", func(t *testing.T) {
-		// Pins the accepted session-rollup tradeoff (see canUseSessionRollup): a
-		// duplicate delivery inflates the rollup's event_count_state (countState
-		// without event_id), so a genuinely single-event session reads event_count>1
-		// and is no longer counted as a bounce — the rollup UNDER-reports bounce rate.
-		// The raw path's count() self-corrects once ReplacingMergeTree merges.
-		const dupProjectID = "proj_session_bounce_dup"
-		occur := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
-		sessionID := "00000000-0000-0000-0000-0000000000e5"
-		eventID := uuid.New().String()
-		// Same event_id twice = an at-least-once redelivery of a one-event session.
-		for i := range 2 {
-			if err := insertSessionEvent(ctx, ch.Conn, dupProjectID, eventID,
-				"page_view", "alice", sessionID, occur, "/only", "US"); err != nil {
-				t.Fatalf("seed dup session event %d: %v", i, err)
-			}
-		}
-		if err := ch.Conn.Exec(ctx, "OPTIMIZE TABLE events FINAL"); err != nil {
-			t.Fatalf("optimize events: %v", err)
-		}
-		from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-		to := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
-		req := sessionSegReq(insightsv1.SessionMetric_SESSION_METRIC_BOUNCE_RATE, from, to)
-
-		resp, err := insights.ExecuteQuery(ctx, executor, dupProjectID, req, time.Now())
-		if err != nil {
-			t.Fatalf("rollup ExecuteQuery: %v", err)
-		}
-		rollupBounce := resp.GetSegmentation().GetTotal()
-
-		rawQ, err := insights.BuildSessionSegmentationQuery(req, dupProjectID)
-		if err != nil {
-			t.Fatalf("BuildSessionSegmentationQuery: %v", err)
-		}
-		rawBounce, err := executor.QueryScalar(ctx, dupProjectID, rawQ)
-		if err != nil {
-			t.Fatalf("QueryScalar: %v", err)
-		}
-		// Documented drift: raw sees a 1-event session (100% bounce); the rollup's
-		// duplicate-inflated event_count=2 drops it below the bounce threshold (0%).
-		if rawBounce != 100 {
-			t.Errorf("raw BOUNCE_RATE = %v, want 100 (single-event session after dedup)", rawBounce)
-		}
-		if rollupBounce != 0 {
-			t.Errorf("rollup BOUNCE_RATE = %v, want 0 (duplicate inflates event_count past the bounce test; see canUseSessionRollup)", rollupBounce)
 		}
 	})
 
@@ -1790,7 +1734,7 @@ func TestIntegration(t *testing.T) {
 		// applyTrendsTopN ranks a series by the SUM OF ITS PER-BUCKET VALUES
 		// (entriesByKey[key].total += r.Value). The rollup CTE groups by dim_value
 		// alone, so it ranks by the WINDOW-WIDE aggregate. Those two coincide for
-		// TOTAL — which is why every pre-existing parity test passed — and diverge
+		// TOTAL (which is why every pre-existing parity test passed) and diverge
 		// for UNIQUE_USERS whenever a user appears in more than one bucket, since
 		// the sum of daily uniques is not the window unique.
 		//
@@ -1866,11 +1810,11 @@ func TestIntegration(t *testing.T) {
 		// This seed used to ALSO have to avoid per-kind orderings that diverge from
 		// the cross-kind ordering: the rollup ranked one shared top_vals over
 		// OR(kinds) while raw ranked per-kind, so a divergent seed broke parity and
-		// that difference was left out of scope here. It is no longer a constraint —
+		// that difference was left out of scope here. It is no longer a constraint:
 		// the rollup now builds one top_vals_<i> per event, scoped to that event's
 		// kind, over that event's own population, and ranked by the SUM of that
 		// event's per-bucket values (a top_grain_<i> CTE at the query's own bucket
-		// grain, summed) — which is what applyTrendsTopN accumulates.
+		// grain, summed), which is what applyTrendsTopN accumulates.
 		//
 		// All three axes matter and each broke separately; the metric axis survived
 		// longest because a window-wide aggregate equals the per-bucket sum for
@@ -1932,7 +1876,7 @@ func TestIntegration(t *testing.T) {
 	t.Run("rollup_parity_trends_multi_event_divergent_top_n", func(t *testing.T) {
 		// The seed above shares one ranking across kinds; this one inverts it, so
 		// each kind names a value the other folded into $others. Zero-filling is
-		// per-kind for exactly this reason — a global grid synthesizes page_view|GB=0
+		// per-kind for exactly this reason: a global grid synthesizes page_view|GB=0
 		// while GB's 5 views are already inside page_view|$others.
 		const projectID = "proj_rollup_divergent_topn"
 		seed := func(kind, cc string, n int) {
@@ -2162,7 +2106,7 @@ func TestIntegration(t *testing.T) {
 		t.Run("unique_users_others_no_overlap_inflation", func(t *testing.T) {
 			// tk_click browsers by UNIQUE_USERS: chrome {u1,u2,u3}, safari {u4,u5},
 			// opera {dup}, brave {dup}. K=2 → chrome 3, safari 2. The $others bucket
-			// re-aggregates raw events, so dup — active in BOTH non-top browsers —
+			// re-aggregates raw events, so dup (active in BOTH non-top browsers)
 			// counts once (uniq of the union), not twice (sum of per-dim uniqs).
 			// This pins the SQL re-aggregation design for the bucket.
 			rows := runTopK(t, &insightsv1.TopKQuery{
@@ -2186,7 +2130,7 @@ func TestIntegration(t *testing.T) {
 			// tk_lit label values: big 3, literal "$others" 2, small 1. K=2 keeps
 			// big and the REAL "$others" value (is_others=false); small collapses
 			// into the synthetic bucket, which is also rendered "$others" but
-			// carries is_others=true — the flag, not the string, identifies it.
+			// carries is_others=true; the flag, not the string, identifies it.
 			rows := runTopK(t, &insightsv1.TopKQuery{
 				Dimension: insightsv1.TopKQuery_DIMENSION_PROPERTY.Enum(),
 				Property:  proto.String("label"),
@@ -2279,7 +2223,7 @@ func TestIntegration(t *testing.T) {
 			// queries (materialized dim / event kind, no filters, kind-only
 			// scope) through the rollup; the raw builder is forced via
 			// BuildTopKQuery directly. With no duplicate deliveries seeded the
-			// two paths must agree exactly — rows, order, and flags.
+			// two paths must agree exactly: rows, order, and flags.
 			parityCases := []struct {
 				name string
 				tk   func() *insightsv1.TopKQuery
@@ -2357,7 +2301,7 @@ func TestIntegration(t *testing.T) {
 		t.Run("user_avg_others_remerge", func(t *testing.T) {
 			// tk_metric per-user order_amount avgs: m1 15, m2 100, m3 20, m4 50,
 			// mnull none (non-numeric → NULL). K=2 → top m2, m4; $others =
-			// {m3,m1,mnull}. AVG is not re-mergeable from per-user avgs — the
+			// {m3,m1,mnull}. AVG is not re-mergeable from per-user avgs; the
 			// bucket re-divides summed numerator by summed non-NULL denominator =
 			// (60+30+0)/(3+2+0) = 18, NOT avg-of-avgs (17.5 or 11.67). The all-NULL
 			// mnull user contributes 0 to both sums.
@@ -2381,7 +2325,7 @@ func TestIntegration(t *testing.T) {
 		t.Run("user_min_others_null_skip", func(t *testing.T) {
 			// Per-user min: m1 10, m2 100, m3 10, m4 50, mnull NULL→rank 0. K=2 →
 			// top m2, m4; $others = {m1,m3,mnull}. The bucket min skips mnull's
-			// NULL partial = min(10,10,NULL) = 10 — NOT 0, which a toFloat64OrZero
+			// NULL partial = min(10,10,NULL) = 10, NOT 0, which a toFloat64OrZero
 			// regression (NULL→0) would produce.
 			rows := runTopKWindow(t, edgeWindow, &insightsv1.TopKQuery{
 				Dimension:      insightsv1.TopKQuery_DIMENSION_USER.Enum(),
@@ -2422,7 +2366,7 @@ func TestIntegration(t *testing.T) {
 
 		t.Run("property_empty_string_dimension", func(t *testing.T) {
 			// chrome×3, ""(no browser)×2, safari×1. K=2 keeps chrome and the
-			// empty/direct bucket as a REAL ranked row (is_others=false) — it is
+			// empty/direct bucket as a REAL ranked row (is_others=false); it is
 			// not hidden; safari collapses into the synthetic $others.
 			rows := runTopKWindow(t, edgeWindow, &insightsv1.TopKQuery{
 				Dimension: insightsv1.TopKQuery_DIMENSION_PROPERTY.Enum(),
@@ -2442,7 +2386,7 @@ func TestIntegration(t *testing.T) {
 
 		t.Run("tie_break_determinism", func(t *testing.T) {
 			// aaa and bbb tie at 2 events; the secondary dim-ASC sort must place
-			// aaa before bbb deterministically — and the rollup path must break
+			// aaa before bbb deterministically, and the rollup path must break
 			// the tie identically to the raw path.
 			tk := func() *insightsv1.TopKQuery {
 				return &insightsv1.TopKQuery{
@@ -2486,7 +2430,7 @@ func TestIntegration(t *testing.T) {
 		t.Run("user_alias_collision_no_inflation", func(t *testing.T) {
 			// distinct_id "collide" resolves to pA (external_id) AND pB (alias).
 			// The identity union's LEFT ANY JOIN must pick ONE canonical id per
-			// event, so 3 collide events count as 3 under a single key — not 6
+			// event, so 3 collide events count as 3 under a single key, not 6
 			// split across pA and pB (which a plain LEFT JOIN would produce,
 			// adding a third row and pushing "solo" into $others).
 			rows := runTopKWindow(t, collisionWindow, &insightsv1.TopKQuery{
@@ -2508,7 +2452,7 @@ func TestIntegration(t *testing.T) {
 
 		t.Run("omit_others", func(t *testing.T) {
 			// One case per builder. Each asserts the omit fast path returns
-			// exactly the default path's top `limit` rows — no trailing $others
+			// exactly the default path's top `limit` rows: no trailing $others
 			// bucket, no row flagged is_others.
 
 			t.Run("property_raw", func(t *testing.T) {
@@ -2571,7 +2515,7 @@ func TestIntegration(t *testing.T) {
 				// serves it via buildTopKFromRollup; BuildTopKQuery forces the raw
 				// omit path. With no duplicate deliveries the two omit paths must
 				// agree exactly. (Parity alone can't distinguish rollup from a
-				// silent raw fallback — both omit paths are identical here;
+				// silent raw fallback; both omit paths are identical here;
 				// routing is pinned by TestTopKQueryForExecution_Dispatch.)
 				tk := func() *insightsv1.TopKQuery {
 					return &insightsv1.TopKQuery{
@@ -2724,7 +2668,7 @@ func assertTrendsParity(t *testing.T, ctx context.Context, executor *insights.Ex
 		t.Errorf("rollup vs raw mismatch:\nrollup=%v\nraw=%v", rollup, raw)
 	}
 	if len(rollup) == 0 {
-		t.Error("empty result — seed/window mismatch would make this parity check vacuous")
+		t.Error("empty result: seed/window mismatch would make this parity check vacuous")
 	}
 }
 
@@ -2749,7 +2693,7 @@ func assertSegParity(t *testing.T, ctx context.Context, executor *insights.Execu
 		t.Errorf("rollup=%v raw=%v", rollup, raw)
 	}
 	if rollup == 0 {
-		t.Error("zero total — seed/window mismatch would make this parity check vacuous")
+		t.Error("zero total: seed/window mismatch would make this parity check vacuous")
 	}
 }
 
@@ -2801,9 +2745,9 @@ func seedFunnelEvents(t *testing.T, ctx context.Context, ch *testutil.TestClickH
 // Layout (all Mar 2024, project_id = testProjectID):
 //
 //	Mar 1: alice, bob, charlie sign_up (10:00)
-//	Mar 1: alice, bob, charlie login (12:00) — day-0 return, all 3 = 100%
-//	Mar 2: alice, bob login — day-1 return, 2/3 ≈ 66.7%
-//	Mar 3: alice login — day-2 return, 1/3 ≈ 33.3%
+//	Mar 1: alice, bob, charlie login (12:00): day-0 return, all 3 = 100%
+//	Mar 2: alice, bob login: day-1 return, 2/3 ≈ 66.7%
+//	Mar 3: alice login: day-2 return, 1/3 ≈ 33.3%
 func seedRetentionEvents(t *testing.T, ctx context.Context, ch *testutil.TestClickHouse) {
 	t.Helper()
 
@@ -3107,7 +3051,7 @@ func seedPurchases(t *testing.T, ctx context.Context, ch *testutil.TestClickHous
 //
 //	tk_view (11): $browser chrome×5, safari×3, firefox×2, edge×1
 //	tk_click (7): $browser chrome by u1,u2,u3; safari by u4,u5; opera + brave both by dup
-//	tk_purchase (5): order_amount — alice 100, alice_ext 50, alice_anon 25 (one
+//	tk_purchase (5): order_amount: alice 100, alice_ext 50, alice_anon 25 (one
 //	  canonical user via seedIntegrationProfiles), bob_ext 120, ghost 80 (no profile)
 //	tk_lit (6): label big×3, literal "$others"×2, small×1
 func seedTopKEvents(t *testing.T, ctx context.Context, ch *testutil.TestClickHouse) {
@@ -3193,7 +3137,7 @@ func seedTopKEvents(t *testing.T, ctx context.Context, ch *testutil.TestClickHou
 //
 // Layout (project_id = testProjectID, Oct 1–3 2024):
 //
-//	tk_metric: per-user order_amount for AVG/MIN/MAX $others re-merge —
+//	tk_metric: per-user order_amount for AVG/MIN/MAX $others re-merge:
 //	  m1 [10,20], m2 [100], m3 [10,20,30], m4 [50], mnull ["x" non-numeric → NULL]
 //	tk_empty:  $browser chrome×3, ""(absent)×2, safari×1 (empty value is a real row)
 //	tk_tie:    $browser aaa×2, bbb×2, ccc×1 (equal-value tie-break)
@@ -3503,7 +3447,7 @@ type sessionSeed struct {
 }
 
 // seedSessionEvents inserts a fixed set of sessions under a dedicated project so
-// session parity assertions are deterministic. Layout (all "page_view", Jan 2024):
+// session assertions are deterministic. Layout (all "page_view", Jan 2024):
 //
 //	A (alice, US): /landing @ Jan1 10:00 → /checkout @ Jan1 10:05  (2 ev, dur 300s, start Jan1)
 //	B (bob, GB):   /home    @ Jan1 11:00                            (1 ev, bounce, start Jan1)
@@ -3512,7 +3456,7 @@ type sessionSeed struct {
 //
 // D straddles the Jan1/Jan2 boundary: it starts Jan1 23:30, so a [Jan2,Jan3) window
 // must EXCLUDE it entirely (keyed on start, not clipped) even though it has a Jan2
-// event — the property that distinguishes full-session semantics from event clipping.
+// event: the property that distinguishes full-session semantics from event clipping.
 // Entry≠exit for A (/landing vs /checkout) and D (/x vs /y) exercises argMin vs argMax.
 func seedSessionEvents(t *testing.T, ctx context.Context, ch *testutil.TestClickHouse, projectID string) {
 	t.Helper()
@@ -3585,67 +3529,12 @@ func flattenSessionTrends(resp *insightsv1.QueryResponse) map[string]float64 {
 	return out
 }
 
-// assertSessionTrendsParity runs a session trends req through ExecuteQuery (rollup
-// when eligible) and the raw builder, asserting identical flattened output. This is
-// the load-bearing check that the rollup and raw paths agree numerically.
-func assertSessionTrendsParity(t *testing.T, ctx context.Context, executor *insights.Executor, projectID string, req *insightsv1.QueryRequest) {
+// sessionSegTotal runs a session segmentation req and returns its scalar total.
+func sessionSegTotal(t *testing.T, ctx context.Context, executor *insights.Executor, projectID string, req *insightsv1.QueryRequest) float64 {
 	t.Helper()
 	resp, err := insights.ExecuteQuery(ctx, executor, projectID, req, time.Now())
 	if err != nil {
-		t.Fatalf("rollup ExecuteQuery: %v", err)
+		t.Fatalf("ExecuteQuery: %v", err)
 	}
-	rollup := flattenSessionTrends(resp)
-
-	rawQ, err := insights.BuildSessionTrendsQuery(req, projectID)
-	if err != nil {
-		t.Fatalf("raw BuildSessionTrendsQuery: %v", err)
-	}
-	rawRows, err := executor.QueryTrends(ctx, projectID, rawQ)
-	if err != nil {
-		t.Fatalf("raw QueryTrends: %v", err)
-	}
-	raw, err := flattenSessionTrendsFromRaw(ctx, rawRows, rawQ)
-	if err != nil {
-		t.Fatalf("flattenSessionTrendsFromRaw: %v", err)
-	}
-	if !reflect.DeepEqual(rollup, raw) {
-		t.Errorf("session trends rollup vs raw mismatch:\nrollup=%v\nraw=%v", rollup, raw)
-	}
-	if len(rollup) == 0 {
-		t.Error("empty result — seed/window mismatch would make this parity check vacuous")
-	}
-}
-
-// flattenSessionTrendsFromRaw mirrors flattenTrendsFromRaw but keys on $url.
-func flattenSessionTrendsFromRaw(ctx context.Context, rows []insights.TrendRow, q insights.TrendsQuery) (map[string]float64, error) {
-	series, err := insights.GroupSeries(ctx, rows, q.Properties(), q.BreakdownLimit())
-	if err != nil {
-		return nil, err
-	}
-	return flattenSessionTrends(&insightsv1.QueryResponse{
-		Result: &insightsv1.QueryResponse_Trends{Trends: &insightsv1.TrendsResult{Series: series}},
-	}), nil
-}
-
-// assertSessionSegParity mirrors assertSessionTrendsParity for the scalar total.
-func assertSessionSegParity(t *testing.T, ctx context.Context, executor *insights.Executor, projectID string, req *insightsv1.QueryRequest) float64 {
-	t.Helper()
-	resp, err := insights.ExecuteQuery(ctx, executor, projectID, req, time.Now())
-	if err != nil {
-		t.Fatalf("rollup ExecuteQuery: %v", err)
-	}
-	rollup := resp.GetSegmentation().GetTotal()
-
-	rawQ, err := insights.BuildSessionSegmentationQuery(req, projectID)
-	if err != nil {
-		t.Fatalf("raw BuildSessionSegmentationQuery: %v", err)
-	}
-	raw, err := executor.QueryScalar(ctx, projectID, rawQ)
-	if err != nil {
-		t.Fatalf("raw QueryScalar: %v", err)
-	}
-	if rollup != raw {
-		t.Errorf("session seg rollup=%v raw=%v", rollup, raw)
-	}
-	return rollup
+	return resp.GetSegmentation().GetTotal()
 }

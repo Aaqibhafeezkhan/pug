@@ -18,9 +18,9 @@ import (
 	"github.com/pug-sh/pug/internal/testutil"
 )
 
-// botWindow is the day-aligned UTC window every query below uses, so trends,
-// top K and sessions ride the rollup fast path and the raw builders are run
-// explicitly for parity.
+// botWindow is the day-aligned UTC window every query below uses, so trends
+// and top K ride the rollup fast path and the raw builders are run explicitly
+// for parity.
 func botWindow() *commonv1.TimeRange {
 	return &commonv1.TimeRange{
 		From: timestamppb.New(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)),
@@ -217,7 +217,7 @@ func TestIntegrationBotTagging(t *testing.T) {
 		}
 	})
 
-	// A session that straddles the tag — two human-looking hits, then a tagged
+	// A session that straddles the tag: two human-looking hits, then a tagged
 	// one (client-supplied $platform, a per-request ASN, or a deploy mid-session
 	// all produce this). One tagged event excludes the session.
 	t.Run("sessions_judged_whole", func(t *testing.T) {
@@ -241,19 +241,6 @@ func TestIntegrationBotTagging(t *testing.T) {
 		// non-bouncing third session and report 66.7.
 		if got := trendsSum(t, botSessionsReq(bounce, false)); got != 100 {
 			t.Errorf("BOUNCE_RATE default = %v, want 100", got)
-		}
-		for _, metric := range []insightsv1.SessionMetric{
-			sessions, bounce,
-			insightsv1.SessionMetric_SESSION_METRIC_AVG_DURATION,
-			insightsv1.SessionMetric_SESSION_METRIC_AVG_EVENTS_PER_SESSION,
-			insightsv1.SessionMetric_SESSION_METRIC_ENTRY,
-			insightsv1.SessionMetric_SESSION_METRIC_EXIT,
-		} {
-			t.Run(metric.String(), func(t *testing.T) {
-				for _, include := range []bool{false, true} {
-					assertSessionTrendsParity(t, ctx, executor, projectID, botSessionsReq(metric, include))
-				}
-			})
 		}
 
 		// The straddler is the only multi-event session, so the only source of
