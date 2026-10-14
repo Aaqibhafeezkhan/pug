@@ -560,7 +560,8 @@ func TestConvertActivitySummary(t *testing.T) {
 
 // TestGet_ReturnsProfile pins the GetByID happy path through the
 // scan + unwrap chain against a real CH JSON column. The List integration
-// path covers a different SQL shape (create_time ordering); this test
+// path covers a different SQL shape (the ListSort keyset, create time by
+// default); this test
 // independently exercises the getSingle path (update_time DESC LIMIT 1).
 func TestGet_ReturnsProfile(t *testing.T) {
 	if testing.Short() {

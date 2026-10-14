@@ -252,7 +252,7 @@ func TestProfilesList_MixedKeysetPagination(t *testing.T) {
 		pages = append(pages, ids)
 		last := got[len(got)-1]
 		params.HasCursor = true
-		params.CursorTime = last.CreateTime
+		params.CursorKey = last.SortKey
 		params.CursorID = last.ID
 		if len(pages) > 5 {
 			t.Fatalf("pagination did not terminate: %v", pages)
@@ -727,7 +727,7 @@ func TestProfilesList_CrossProjectIsolation(t *testing.T) {
 
 // TestProfilesList_PaginationTieBreakAtEqualCreateTime exercises the cursor's
 // secondary key. The mixed-pagination test uses all-distinct create_times, so
-// the `create_time = ? AND id < ?` tie-break clause is never hit. Here three
+// the seek tuple's id component never decides a page boundary. Here three
 // persons — two anonymous, one identified — share one create_time, forcing the
 // tie-break across a page boundary. A broken secondary key drops or duplicates
 // a person; every person must appear exactly once, in id-DESC order.
@@ -776,7 +776,7 @@ func TestProfilesList_PaginationTieBreakAtEqualCreateTime(t *testing.T) {
 		}
 		last := got[len(got)-1]
 		params.HasCursor = true
-		params.CursorTime = last.CreateTime
+		params.CursorKey = last.SortKey
 		params.CursorID = last.ID
 	}
 

@@ -106,13 +106,13 @@ const (
 	ListSortLastSeen   ListSort = "last_seen"
 )
 
-// ListParams configures one page of List. CursorTime and CursorID seek past
-// the previous page's last row. CursorTime is that row's ListSortValue under
-// the same Sort. The zero Sort orders by create time.
+// ListParams configures one page of List. CursorKey and CursorID seek past
+// the previous page's last row: its ListedProfile.SortKey and ID under the
+// same Sort. The zero Sort orders by create time.
 type ListParams struct {
 	ProjectID   string
 	HasCursor   bool
-	CursorTime  time.Time
+	CursorKey   int64
 	CursorID    string
 	PageSize    int32
 	Filter      chq.Condition
@@ -120,12 +120,21 @@ type ListParams struct {
 	Sort        ListSort
 }
 
+// ListedProfile is a List row: the profile and the key the query ordered it by
+// (listOrderExpr, epoch milliseconds). The next page's cursor must carry that
+// key itself rather than rebuild it from Profile, whose Activity is nil for a
+// person SQL may still have ordered by a non-epoch key.
+type ListedProfile struct {
+	Profile
+	SortKey int64
+}
+
 // listOrderExpr is the ordering column for sort, as epoch milliseconds. An
 // Int64 binds exactly, while a time.Time bound to a ? placeholder is formatted
 // to whole seconds and would seek from the start of the cursor's second. A
 // person with no activity row reads first and last seen as the epoch (the
 // LEFT JOIN's default for a missing row, which the coalesce repeats), so the
-// activity sorts order them last.
+// activity sorts order them after anyone whose activity is dated after 1970.
 func listOrderExpr(sort ListSort) string {
 	switch sort {
 	case ListSortFirstSeen:
@@ -136,32 +145,6 @@ func listOrderExpr(sort ListSort) string {
 		return "toUnixTimestamp64Milli(p.create_time)"
 	default:
 		return "toUnixTimestamp64Milli(p.create_time)"
-	}
-}
-
-// ListSortValue is the Go side of listOrderExpr: the value p was ordered by,
-// which the cursor after it must carry. The two must agree, or the next page
-// seeks on a value the previous one never ordered by. They agree to the
-// millisecond because every column involved is DateTime64(3). For a person
-// without activity they agree because scanProfile leaves Activity nil exactly
-// when total_events is 0, which means there was no activity row and SQL read
-// the epoch.
-func ListSortValue(sort ListSort, p Profile) time.Time {
-	switch sort {
-	case ListSortFirstSeen:
-		if p.Activity == nil {
-			return time.UnixMilli(0).UTC()
-		}
-		return p.Activity.FirstSeen
-	case ListSortLastSeen:
-		if p.Activity == nil {
-			return time.UnixMilli(0).UTC()
-		}
-		return p.Activity.LastSeen
-	case ListSortCreateTime:
-		return p.CreateTime
-	default:
-		return p.CreateTime
 	}
 }
 
@@ -266,7 +249,7 @@ func (s *Service) getSingle(ctx context.Context, projectID string, includeBots b
 	return profile, nil
 }
 
-func (s *Service) List(ctx context.Context, params ListParams) ([]Profile, error) {
+func (s *Service) List(ctx context.Context, params ListParams) ([]ListedProfile, error) {
 	if s == nil || s.ch == nil {
 		return nil, errors.New("profiles: clickhouse conn is nil")
 	}
@@ -277,13 +260,16 @@ func (s *Service) List(ctx context.Context, params ListParams) ([]Profile, error
 	}
 	if params.HasCursor {
 		wheres = append(wheres, chq.RawCond(fmt.Sprintf("(%s, p.id) < (?, ?)", orderExpr),
-			params.CursorTime.UnixMilli(), params.CursorID))
+			params.CursorKey, params.CursorID))
 	}
 	if !params.Filter.IsZero() {
 		wheres = append(wheres, params.Filter)
 	}
 
+	// The key is selected after profileSelectColumns, so scanProfile reads it
+	// through its extra destinations.
 	sql, args, err := personsQuery(params.ProjectID, params.IncludeBots).
+		Select(orderExpr+" AS list_sort_key").
 		Where(wheres...).
 		OrderBy(orderExpr+" DESC", "p.id DESC").
 		Limit(int64(params.PageSize)).
@@ -303,13 +289,14 @@ func (s *Service) List(ctx context.Context, params ListParams) ([]Profile, error
 		}
 	}()
 
-	items := make([]Profile, 0)
+	items := make([]ListedProfile, 0)
 	for rows.Next() {
-		profile, err := scanProfile(ctx, rows)
+		var sortKey int64
+		profile, err := scanProfile(ctx, rows, &sortKey)
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, profile)
+		items = append(items, ListedProfile{Profile: profile, SortKey: sortKey})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -590,7 +577,9 @@ func profileActivitySummaryCTE(projectID string, includeBots bool) *chq.Query {
 		GroupBy("identity.project_id", "identity.profile_id")
 }
 
-func scanProfile(ctx context.Context, rows driver.Rows) (Profile, error) {
+// scanProfile scans a profileSelectColumns row. extra receives any columns a
+// caller selected after them, in order.
+func scanProfile(ctx context.Context, rows driver.Rows, extra ...any) (Profile, error) {
 	var profile Profile
 	var rawProperties chcol.JSON
 	var activity ProfileActivitySummary
@@ -598,7 +587,7 @@ func scanProfile(ctx context.Context, rows driver.Rows) (Profile, error) {
 	var pageviews uint64
 	var sessions uint64
 	var bot uint8
-	if err := rows.Scan(
+	dest := []any{
 		&profile.CreateTime,
 		&profile.ExternalID,
 		&profile.ID,
@@ -619,7 +608,8 @@ func scanProfile(ctx context.Context, rows driver.Rows) (Profile, error) {
 		&activity.Region,
 		&activity.City,
 		&bot,
-	); err != nil {
+	}
+	if err := rows.Scan(append(dest, extra...)...); err != nil {
 		return Profile{}, err
 	}
 	profile.Properties = unwrapJSONProperties(ctx, &rawProperties)

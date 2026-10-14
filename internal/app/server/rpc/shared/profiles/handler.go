@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"connectrpc.com/connect"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pug-sh/pug/internal/app/server/rpc"
 	"github.com/pug-sh/pug/internal/apperr"
 	coreprofiles "github.com/pug-sh/pug/internal/core/profiles"
@@ -231,7 +231,7 @@ func (s *Server) List(
 	}
 
 	sort := profileListSort(req.Msg.GetSort())
-	var cursorTime pgtype.Timestamptz
+	var cursorKey int64
 	var cursorID string
 	hasCursor := false
 
@@ -246,7 +246,7 @@ func (s *Server) List(
 			return apperr.Invalid(apperr.ReasonInvalidPageToken,
 				"page token was issued for a different sort; restart from an empty token to change it")
 		}
-		cursorTime = postgres.NewTimestamptz(cursor.Time)
+		cursorKey = cursor.Time.UnixMilli()
 		cursorID = cursor.ID
 		hasCursor = true
 	}
@@ -267,7 +267,7 @@ func (s *Server) List(
 		chProfiles, err := s.service.List(ctx, coreprofiles.ListParams{
 			ProjectID:   principal.Project.ID,
 			HasCursor:   hasCursor,
-			CursorTime:  cursorTime.Time,
+			CursorKey:   cursorKey,
 			CursorID:    cursorID,
 			PageSize:    pageSize + 1,
 			Filter:      chFilterCond,
@@ -284,25 +284,25 @@ func (s *Server) List(
 				slog.String("sort", string(sort)),
 				slog.Bool("has_cursor", hasCursor),
 				slog.String("cursor_id", cursorID),
-				slog.Time("cursor_time", cursorTime.Time))
+				slog.Int64("cursor_key", cursorKey))
 			telemetry.RecordError(ctx, err)
 			return connect.NewError(connect.CodeInternal, errors.New("failed to list profiles"))
 		}
 
-		page, err := buildProfilePage(ctx, chProfiles, sort)
+		page, err := buildProfilePage(ctx, chProfiles)
 		if err != nil {
 			return err
 		}
 		if page.isEmpty() {
 			break
 		}
-		cursorTime = page.cursorTime
+		cursorKey = page.cursorKey
 		cursorID = page.cursorID
 		hasCursor = true
 
 		nextPageToken := ""
 		if page.hasNextPage {
-			cursor := &profileListCursor{Sort: sort, Time: cursorTime.Time, ID: cursorID}
+			cursor := &profileListCursor{Sort: sort, Time: time.UnixMilli(cursorKey).UTC(), ID: cursorID}
 			nextPageToken, err = cursor.encode()
 			if err != nil {
 				slog.ErrorContext(ctx, "failed encoding page token", slogx.Error(err))
@@ -338,7 +338,7 @@ func (s *Server) List(
 type profilePage struct {
 	profiles    []*profilesv1.Profile
 	hasNextPage bool
-	cursorTime  pgtype.Timestamptz
+	cursorKey   int64
 	cursorID    string
 }
 
@@ -346,7 +346,7 @@ func (p profilePage) isEmpty() bool {
 	return len(p.profiles) == 0 && p.cursorID == ""
 }
 
-func buildProfilePage(ctx context.Context, profiles []coreprofiles.Profile, sort coreprofiles.ListSort) (profilePage, error) {
+func buildProfilePage(ctx context.Context, profiles []coreprofiles.ListedProfile) (profilePage, error) {
 	if len(profiles) == 0 {
 		return profilePage{}, nil
 	}
@@ -359,7 +359,7 @@ func buildProfilePage(ctx context.Context, profiles []coreprofiles.Profile, sort
 
 	out := make([]*profilesv1.Profile, 0, len(pageProfiles))
 	for _, p := range pageProfiles {
-		pbProfile, err := convertProfile(p)
+		pbProfile, err := convertProfile(p.Profile)
 		if err != nil {
 			slog.ErrorContext(ctx, "failed converting profile", slogx.Error(err), slog.String("profile_id", p.ID))
 			telemetry.RecordError(ctx, err)
@@ -372,7 +372,7 @@ func buildProfilePage(ctx context.Context, profiles []coreprofiles.Profile, sort
 	return profilePage{
 		profiles:    out,
 		hasNextPage: hasNextPage,
-		cursorTime:  postgres.NewTimestamptz(coreprofiles.ListSortValue(sort, last)),
+		cursorKey:   last.SortKey,
 		cursorID:    last.ID,
 	}, nil
 }

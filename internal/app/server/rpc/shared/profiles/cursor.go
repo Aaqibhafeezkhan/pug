@@ -10,10 +10,12 @@ import (
 	coreprofiles "github.com/pug-sh/pug/internal/core/profiles"
 )
 
-// profileListCursor is a keyset pagination cursor for the profiles list. It
-// encodes the sort it was issued under and the last returned row's value in
-// that sort's column (coreprofiles.ListSortValue) and id: the seek point for
-// the next page. Matches the ORDER BY <sort column> DESC, id DESC.
+// profileListCursor is a keyset pagination cursor for the profiles list: the
+// sort it was issued under, and the last returned row's sort key and id. The
+// key (coreprofiles.ListedProfile.SortKey, epoch milliseconds) travels as Time
+// so tokens minted before the sort existed still decode. List compares it as
+// milliseconds again, since a time.Time bound to the query would be truncated
+// to the second.
 type profileListCursor struct {
 	Sort coreprofiles.ListSort `json:"s"`
 	Time time.Time             `json:"t"`
@@ -29,8 +31,10 @@ func (c *profileListCursor) encode() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// decodeProfileListCursor decodes a base64url-encoded JSON page token.
-// Returns an error if the token is malformed or missing required fields.
+// decodeProfileListCursor decodes a base64url-encoded JSON page token. A token
+// without a sort predates ListRequest.sort and resumes as create time. Returns
+// an error if the token is malformed, is missing required fields, or names an
+// unknown sort.
 func decodeProfileListCursor(token string) (*profileListCursor, error) {
 	b, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {
