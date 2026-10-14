@@ -81,8 +81,7 @@ message Project {
   string reporting_timezone = 7;
   // The project's default theme, as a theme reference: a built-in id
   // ("pug-colourblind") or an https URL of a theme file, either optionally ending
-  // in #light or #dark to pin the mode. Empty = no default. Members' browsers
-  // fetch the URL; the server never does.
+  // in #light or #dark to pin the mode. Empty = no default.
   string default_theme = 8;
 }
 
@@ -94,8 +93,8 @@ message ApiKey {
   string display_name = 2;
   string id = 3;
   ApiKeyKind kind = 4;
-  // Full value for a public key; empty for a private key — use `masked` to
-  // identify one of those.
+  // Full value for a public key; empty for a private key (use `masked` to
+  // identify one of those).
   string key = 5;
   // Fixed-format hint ("prv_...3f9c") to tell a project's keys apart.
   string masked = 6;
@@ -121,7 +120,7 @@ message CreateApiKeyRequest {
 
 message CreateApiKeyResponse {
   ApiKey api_key = 1;
-  // The full key. For a private key this is the only time it is ever returned —
+  // The full key. For a private key this is the only time it is ever returned;
   // it is unrecoverable afterwards.
   string key = 2;
 }
@@ -144,29 +143,28 @@ message UpdateMetaRequest {
   ];
   // IANA timezone (e.g. "Asia/Kolkata") aligning insight/dashboard bucket
   // boundaries to the project's calendar. Empty = UTC. Unlike creation, a malformed
-  // value is rejected (CodeInvalidArgument) rather than coerced — this is an
+  // value is rejected (CodeInvalidArgument) rather than coerced, since this is an
   // explicit settings action.
   string reporting_timezone = 2 [(buf.validate.field).string = {
     max_len: 64
     pattern: "^[A-Za-z0-9_+/-]*$"
   }];
-  // Optional (partial update): omit to leave the default theme unchanged; "" clears
-  // it. Otherwise a theme reference (see Project.default_theme). Every member's
-  // browser requests a URL stored here, so a URL must be https with a lowercase
-  // plain DNS host: no userinfo, no IP address, no localhost. "[.]" is a literal
-  // dot, to keep backslashes out of the CEL strings.
+  // Optional (partial update): omit to leave it unchanged; "" clears it. Members'
+  // browsers fetch a URL stored here and the server never does, so a URL must be
+  // https with a lowercase DNS host: no userinfo, no IP address, no localhost.
   string default_theme = 3 [
     (buf.validate.field).string.max_len = 2048,
     (buf.validate.field).cel = {
       id: "default_theme.form"
-      message: "must be empty, a built-in theme id, or an https URL, optionally ending in #light or #dark"
+      message: "must be empty, a built-in theme id, or an https URL with a lowercase DNS host, optionally ending in #light or #dark"
       expression: "this == '' || this.matches('^[a-z0-9-]{1,64}(#(light|dark))?$') || this.matches('^https://[a-z0-9.-]+(:[0-9]{1,5})?(/[!-\"$-~]*)?(#(light|dark))?$')"
     },
     (buf.validate.field).cel = {
       id: "default_theme.installed"
-      message: "an installed theme exists in one browser only"
+      message: "can't be an installed theme: it exists in one browser only"
       expression: "!this.startsWith('installed-')"
     },
+    // [.] is a literal dot without the four backslashes "\." would need here.
     (buf.validate.field).cel = {
       id: "default_theme.host"
       message: "the host can't be localhost or an IP address"

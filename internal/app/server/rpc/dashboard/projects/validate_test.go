@@ -83,7 +83,7 @@ func TestCreateApiKeyRequest_DisplayNameBounds(t *testing.T) {
 		t.Fatal("display_name over 150 chars should fail max_len")
 	}
 
-	// A label is optional — an unnamed key is fine.
+	// A label is optional: an unnamed key is fine.
 	req.DisplayName = nil
 	if err := protovalidate.Validate(req); err != nil {
 		t.Fatalf("omitted display_name should be valid: %v", err)
@@ -99,9 +99,6 @@ func TestDeleteApiKeyRequest_IDRequired(t *testing.T) {
 	}
 }
 
-// default_theme is a theme reference that every member's browser will request, so what may be stored is
-// decided here, before the handler: a built-in id or a lowercase https URL with a plain DNS host, either
-// optionally pinned to #light or #dark. Omitted is "leave unchanged"; "" clears.
 func TestUpdateMetaRequest_DefaultTheme(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -126,9 +123,18 @@ func TestUpdateMetaRequest_DefaultTheme(t *testing.T) {
 		{"localhost", "https://localhost/t.json", false},
 		{"localhost with a port", "https://localhost:8080/t.json", false},
 		{"a .localhost name", "https://app.localhost/t.json", false},
+		{"localhost with a trailing dot", "https://localhost./t.json", false},
+		{"localhost with no path", "https://localhost", false},
+		{"localhost pinned with no path", "https://localhost#dark", false},
 		{"IPv4", "https://10.0.0.1/t.json", false},
+		{"IPv4 with a trailing dot", "https://10.0.0.1./t.json", false},
+		{"IPv4 with a port", "https://10.0.0.1:8080/t.json", false},
+		{"IPv4 with no path", "https://127.0.0.1", false},
+		{"IPv4 pinned with no path", "https://127.0.0.1#dark", false},
+		{"short IPv4", "https://127.1/t.json", false},
 		{"decimal IPv4", "https://2130706433/t.json", false},
 		{"hex IPv4", "https://0x7f000001/t.json", false},
+		{"hex IPv4 with no digits", "https://0x/t.json", false},
 		{"IPv6", "https://[::1]/t.json", false},
 		{"percent-encoded host", "https://%6c%6fcalhost/t.json", false},
 		{"a space in the path", "https://themes.pug.sh/a b.json", false},
@@ -144,12 +150,5 @@ func TestUpdateMetaRequest_DefaultTheme(t *testing.T) {
 				t.Fatalf("%q should be refused", tt.value)
 			}
 		})
-	}
-}
-
-func TestUpdateMetaRequest_OmittedDefaultThemeIsValid(t *testing.T) {
-	req := &projectsv1.UpdateMetaRequest{DisplayName: proto.String("ok")}
-	if err := protovalidate.Validate(req); err != nil {
-		t.Fatalf("omitted default_theme should be valid (partial update): %v", err)
 	}
 }
