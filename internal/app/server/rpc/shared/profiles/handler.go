@@ -201,6 +201,21 @@ func (s *Server) GetByExternalId(
 	}), nil
 }
 
+// profileListSort maps the requested sort onto the reader's. UNSPECIFIED is
+// create time, the order the list had before it took a sort.
+func profileListSort(sort profilesv1.ProfileListSort) coreprofiles.ListSort {
+	switch sort {
+	case profilesv1.ProfileListSort_PROFILE_LIST_SORT_FIRST_SEEN:
+		return coreprofiles.ListSortFirstSeen
+	case profilesv1.ProfileListSort_PROFILE_LIST_SORT_LAST_SEEN:
+		return coreprofiles.ListSortLastSeen
+	case profilesv1.ProfileListSort_PROFILE_LIST_SORT_CREATE_TIME:
+		return coreprofiles.ListSortCreateTime
+	default:
+		return coreprofiles.ListSortCreateTime
+	}
+}
+
 // pageSize is the server-controlled batch size for streaming profile pages.
 // Not configurable by the client — there is no page_size field in the proto request.
 const pageSize = 100
@@ -215,6 +230,7 @@ func (s *Server) List(
 		return err
 	}
 
+	sort := profileListSort(req.Msg.GetSort())
 	var cursorTime pgtype.Timestamptz
 	var cursorID string
 	hasCursor := false
@@ -224,7 +240,13 @@ func (s *Server) List(
 		if err != nil {
 			return apperr.Invalid(apperr.ReasonInvalidPageToken, "invalid page token")
 		}
-		cursorTime = postgres.NewTimestamptz(cursor.CreateTime)
+		// The seek value is a time in the column the token was issued under;
+		// seeking another column's order on it would skip or repeat people.
+		if cursor.Sort != sort {
+			return apperr.Invalid(apperr.ReasonInvalidPageToken,
+				"page token was issued for a different sort; restart from an empty token to change it")
+		}
+		cursorTime = postgres.NewTimestamptz(cursor.Time)
 		cursorID = cursor.ID
 		hasCursor = true
 	}
@@ -250,6 +272,7 @@ func (s *Server) List(
 			PageSize:    pageSize + 1,
 			Filter:      chFilterCond,
 			IncludeBots: req.Msg.GetIncludeBots(),
+			Sort:        sort,
 		})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -258,6 +281,7 @@ func (s *Server) List(
 			slog.ErrorContext(ctx, "failed listing profiles",
 				slogx.Error(err),
 				slog.String("project_id", principal.Project.ID),
+				slog.String("sort", string(sort)),
 				slog.Bool("has_cursor", hasCursor),
 				slog.String("cursor_id", cursorID),
 				slog.Time("cursor_time", cursorTime.Time))
@@ -265,7 +289,7 @@ func (s *Server) List(
 			return connect.NewError(connect.CodeInternal, errors.New("failed to list profiles"))
 		}
 
-		page, err := buildProfilePage(ctx, chProfiles)
+		page, err := buildProfilePage(ctx, chProfiles, sort)
 		if err != nil {
 			return err
 		}
@@ -278,7 +302,7 @@ func (s *Server) List(
 
 		nextPageToken := ""
 		if page.hasNextPage {
-			cursor := &profileListCursor{CreateTime: cursorTime.Time, ID: cursorID}
+			cursor := &profileListCursor{Sort: sort, Time: cursorTime.Time, ID: cursorID}
 			nextPageToken, err = cursor.encode()
 			if err != nil {
 				slog.ErrorContext(ctx, "failed encoding page token", slogx.Error(err))
@@ -322,7 +346,7 @@ func (p profilePage) isEmpty() bool {
 	return len(p.profiles) == 0 && p.cursorID == ""
 }
 
-func buildProfilePage(ctx context.Context, profiles []coreprofiles.Profile) (profilePage, error) {
+func buildProfilePage(ctx context.Context, profiles []coreprofiles.Profile, sort coreprofiles.ListSort) (profilePage, error) {
 	if len(profiles) == 0 {
 		return profilePage{}, nil
 	}
@@ -348,7 +372,7 @@ func buildProfilePage(ctx context.Context, profiles []coreprofiles.Profile) (pro
 	return profilePage{
 		profiles:    out,
 		hasNextPage: hasNextPage,
-		cursorTime:  postgres.NewTimestamptz(last.CreateTime),
+		cursorTime:  postgres.NewTimestamptz(coreprofiles.ListSortValue(sort, last)),
 		cursorID:    last.ID,
 	}, nil
 }
