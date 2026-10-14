@@ -1113,13 +1113,13 @@ const file_dashboard_projects_v1_projects_proto_rawDesc = "" +
 	"\x03key\x18\x02 \x01(\tR\x03key\"-\n" +
 	"\x13DeleteApiKeyRequest\x12\x16\n" +
 	"\x02id\x18\x01 \x01(\tB\x06\xbaH\x03\xc8\x01\x01R\x02id\"\x16\n" +
-	"\x14DeleteApiKeyResponse\"\xc6\x06\n" +
+	"\x14DeleteApiKeyResponse\"\xa9\a\n" +
 	"\x11UpdateMetaRequest\x12-\n" +
 	"\fdisplay_name\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x96\x01R\vdisplayName\x12J\n" +
-	"\x12reporting_timezone\x18\x02 \x01(\tB\x1b\xbaH\x18r\x16\x18@2\x12^[A-Za-z0-9_+/-]*$R\x11reportingTimezone\x12\xb5\x05\n" +
-	"\rdefault_theme\x18\x03 \x01(\tB\x8f\x05\xbaH\x8b\x05\xba\x01\x9f\x02\n" +
-	"\x12default_theme.form\x12smust be empty, a built-in theme id, or an https URL with a lowercase DNS host, optionally ending in #light or #dark\x1a\x93\x01this == '' || this.matches('^[a-z0-9-]{1,64}(#(light|dark))?$') || this.matches('^https://[a-z0-9.-]+(:[0-9]{1,5})?(/[!-\"$-~]*)?(#(light|dark))?$')\xba\x01u\n" +
+	"\x12reporting_timezone\x18\x02 \x01(\tB\x1b\xbaH\x18r\x16\x18@2\x12^[A-Za-z0-9_+/-]*$R\x11reportingTimezone\x12\x98\x06\n" +
+	"\rdefault_theme\x18\x03 \x01(\tB\xf2\x05\xbaH\xee\x05\xba\x01\x82\x03\n" +
+	"\x12default_theme.form\x12smust be empty, a built-in theme id, or an https URL with a lowercase DNS host, optionally ending in #light or #dark\x1a\xf6\x01this == '' || this.matches('^[a-z0-9-]{1,64}(#(light|dark))?$')|| this.matches('^https://[a-z0-9-]{1,63}([.][a-z0-9-]{1,63})*[.]?(:([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(/[!-\"$-~]*)?(#(light|dark))?$')\xba\x01u\n" +
 	"\x17default_theme.installed\x12:can't be an installed theme: it exists in one browser only\x1a\x1e!this.startsWith('installed-')\xba\x01\xe7\x01\n" +
 	"\x12default_theme.host\x12,the host can't be localhost or an IP address\x1a\xa2\x01!this.matches('^https://([a-z0-9.-]*[.])?localhost[.]?(:[0-9]+)?([/#]|$)') && !this.matches('^https://([a-z0-9-]*[.])*([0-9]+|0x[0-9a-f]*)[.]?(:[0-9]+)?([/#]|$)')r\x03\x18\x80\x10R\fdefaultTheme\"N\n" +
 	"\x12UpdateMetaResponse\x128\n" +
