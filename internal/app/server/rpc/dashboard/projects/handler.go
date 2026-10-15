@@ -20,10 +20,11 @@ import (
 	"github.com/pug-sh/pug/internal/tzx"
 )
 
-// Authorization (project-role gating) is enforced centrally by
+// Authorization (org-role gating) is enforced centrally by
 // rpc.AuthzInterceptor from the permission registry, before any handler runs:
-// project lifecycle writes are admin-only, BatchGet is member+, all resolved
-// from the registry. Create additionally has a race-safe admin check in its CTE.
+// project lifecycle writes are admin-only, and Get and BatchGet serve every
+// role, viewers included. Create additionally has a race-safe admin check in
+// its CTE.
 type server struct {
 	service *projects.Service
 }

@@ -10,13 +10,14 @@ import (
 	"github.com/pug-sh/pug/internal/gen/repo/dbwrite"
 )
 
-// roToRPCMsg converts a project to its proto message. It carries no key: a
-// project's keys are their own resource, read via ListApiKeys.
+// roToRPCMsg converts a project to its proto message. It carries no API key: a
+// project's keys are their own resource, read via ListApiKeys. Nor does it carry
+// the FCM service-account key, whose field Project reserves: Get and BatchGet
+// serve this message to every org role, viewers included.
 func roToRPCMsg(p dbread.Project) *projectsv1.Project {
 	return &projectsv1.Project{
 		DefaultTheme:      proto.String(p.DefaultTheme),
 		DisplayName:       proto.String(p.DisplayName),
-		FcmServiceJson:    proto.String(p.FcmServiceJson.String),
 		Id:                proto.String(p.ID),
 		OrgId:             proto.String(p.OrgID),
 		ReportingTimezone: proto.String(p.ReportingTimezone),
