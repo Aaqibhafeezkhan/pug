@@ -424,11 +424,10 @@ func (x *GetResponse) GetProject() *Project {
 }
 
 type Project struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	DisplayName    *string                `protobuf:"bytes,1,opt,name=display_name,json=displayName" json:"display_name,omitempty"`
-	FcmServiceJson *string                `protobuf:"bytes,2,opt,name=fcm_service_json,json=fcmServiceJson" json:"fcm_service_json,omitempty"`
-	Id             *string                `protobuf:"bytes,3,opt,name=id" json:"id,omitempty"`
-	OrgId          *string                `protobuf:"bytes,4,opt,name=org_id,json=orgId" json:"org_id,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	DisplayName *string                `protobuf:"bytes,1,opt,name=display_name,json=displayName" json:"display_name,omitempty"`
+	Id          *string                `protobuf:"bytes,3,opt,name=id" json:"id,omitempty"`
+	OrgId       *string                `protobuf:"bytes,4,opt,name=org_id,json=orgId" json:"org_id,omitempty"`
 	// IANA reporting timezone (e.g. "Asia/Kolkata") used to bucket day/week/month
 	// boundaries for this project's insights and dashboards. Empty string = UTC.
 	ReportingTimezone *string `protobuf:"bytes,7,opt,name=reporting_timezone,json=reportingTimezone" json:"reporting_timezone,omitempty"`
@@ -473,13 +472,6 @@ func (*Project) Descriptor() ([]byte, []int) {
 func (x *Project) GetDisplayName() string {
 	if x != nil && x.DisplayName != nil {
 		return *x.DisplayName
-	}
-	return ""
-}
-
-func (x *Project) GetFcmServiceJson() string {
-	if x != nil && x.FcmServiceJson != nil {
-		return *x.FcmServiceJson
 	}
 	return ""
 }
@@ -1085,14 +1077,13 @@ const file_dashboard_projects_v1_projects_proto_rawDesc = "" +
 	"\n" +
 	"GetRequest\"G\n" +
 	"\vGetResponse\x128\n" +
-	"\aproject\x18\x01 \x01(\v2\x1e.dashboard.projects.v1.ProjectR\aproject\"\xfe\x01\n" +
+	"\aproject\x18\x01 \x01(\v2\x1e.dashboard.projects.v1.ProjectR\aproject\"\xec\x01\n" +
 	"\aProject\x12!\n" +
-	"\fdisplay_name\x18\x01 \x01(\tR\vdisplayName\x12(\n" +
-	"\x10fcm_service_json\x18\x02 \x01(\tR\x0efcmServiceJson\x12\x0e\n" +
+	"\fdisplay_name\x18\x01 \x01(\tR\vdisplayName\x12\x0e\n" +
 	"\x02id\x18\x03 \x01(\tR\x02id\x12\x15\n" +
 	"\x06org_id\x18\x04 \x01(\tR\x05orgId\x12-\n" +
 	"\x12reporting_timezone\x18\a \x01(\tR\x11reportingTimezone\x12#\n" +
-	"\rdefault_theme\x18\b \x01(\tR\fdefaultThemeJ\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\x0fprivate_api_keyR\x0epublic_api_key\"\xd9\x01\n" +
+	"\rdefault_theme\x18\b \x01(\tR\fdefaultThemeJ\x04\b\x02\x10\x03J\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\x10fcm_service_jsonR\x0fprivate_api_keyR\x0epublic_api_key\"\xd9\x01\n" +
 	"\x06ApiKey\x12;\n" +
 	"\vcreate_time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"createTime\x12!\n" +

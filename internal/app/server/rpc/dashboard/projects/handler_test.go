@@ -1,6 +1,7 @@
 package projects
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -630,6 +631,87 @@ func TestHandler_ProjectLifecycle_AdminAllowed(t *testing.T) {
 	if _, err := srv.Delete(ctxWithCustomerProject(ctx, customer, p), connect.NewRequest(&projectsv1.DeleteRequest{})); err != nil {
 		t.Fatalf("admin Delete: %v", err)
 	}
+}
+
+// TestHandler_FCMServiceJSON_NeverReturned pins that the stored FCM
+// service-account key is write-only. Get (no role gate) and BatchGet (a
+// viewer-floor read) serve every org role, and UpdateMeta shares their mapper,
+// so no field of their responses may carry the key. GetProjectByID, which push
+// delivery reads, still must.
+func TestHandler_FCMServiceJSON_NeverReturned(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	srv, customer, orgID := newIntegrationServer(t)
+	ctx := context.Background()
+
+	// The sentinel sits inside the private key, so finding it in a response's
+	// wire bytes means some field carries the key, whatever that field is.
+	const sentinel = "fcm-private-key-sentinel"
+	const fcmJSON = `{"type":"service_account","private_key":"-----BEGIN PRIVATE KEY-----\n` + sentinel + `\n-----END PRIVATE KEY-----\n"}`
+
+	assertNoKey := func(rpcName string, m proto.Message) {
+		t.Helper()
+		wire, err := proto.Marshal(m)
+		if err != nil {
+			t.Fatalf("%s: marshal response: %v", rpcName, err)
+		}
+		if bytes.Contains(wire, []byte(sentinel)) {
+			t.Errorf("%s response carries the FCM private key", rpcName)
+		}
+	}
+
+	created, err := srv.Create(ctxWithCustomer(ctx, customer), connect.NewRequest(&projectsv1.CreateRequest{
+		OrgId: proto.String(orgID), DisplayName: proto.String("fcm project"),
+	}))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	projectID := created.Msg.GetProject().GetId()
+	projectCtx := ctxWithCustomerProject(ctx, customer, dbread.Project{ID: projectID, OrgID: orgID})
+
+	set, err := srv.UpdateFCMServiceJSON(projectCtx, connect.NewRequest(&projectsv1.UpdateFCMServiceJSONRequest{FcmServiceJson: proto.String(fcmJSON)}))
+	if err != nil {
+		t.Fatalf("UpdateFCMServiceJSON: %v", err)
+	}
+	assertNoKey("UpdateFCMServiceJSON", set.Msg)
+
+	stored, err := srv.service.GetProjectByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetProjectByID: %v", err)
+	}
+	if stored.FcmServiceJson.String != fcmJSON {
+		t.Fatalf("stored FcmServiceJson = %q, want %q", stored.FcmServiceJson.String, fcmJSON)
+	}
+
+	// Get serves the principal's project row as auth loaded it, key included.
+	// Each read must return the project, or an empty response would pass.
+	got, err := srv.Get(ctxWithCustomerProject(ctx, customer, stored), connect.NewRequest(&projectsv1.GetRequest{}))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if id := got.Msg.GetProject().GetId(); id != projectID {
+		t.Fatalf("Get returned project %q, want %q", id, projectID)
+	}
+	assertNoKey("Get", got.Msg)
+
+	batch, err := srv.BatchGet(ctxWithCustomer(ctx, customer), connect.NewRequest(&projectsv1.BatchGetRequest{OrgId: proto.String(orgID)}))
+	if err != nil {
+		t.Fatalf("BatchGet: %v", err)
+	}
+	if len(batch.Msg.GetProjects()) == 0 {
+		t.Fatal("BatchGet returned no projects")
+	}
+	assertNoKey("BatchGet", batch.Msg)
+
+	updated, err := srv.UpdateMeta(projectCtx, connect.NewRequest(&projectsv1.UpdateMetaRequest{DisplayName: proto.String("fcm project renamed")}))
+	if err != nil {
+		t.Fatalf("UpdateMeta: %v", err)
+	}
+	if id := updated.Msg.GetProject().GetId(); id != projectID {
+		t.Fatalf("UpdateMeta returned project %q, want %q", id, projectID)
+	}
+	assertNoKey("UpdateMeta", updated.Msg)
 }
 
 // ----- API keys: list / create / delete -----
