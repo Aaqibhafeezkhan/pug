@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,16 +96,22 @@ func TestAuthService(t *testing.T) {
 		}
 	})
 
-	t.Run("SignInWithEmail_demoAccount", func(t *testing.T) {
-		if _, err := write.CreateCustomer(ctx, dbwrite.CreateCustomerParams{
-			ID: "cust-demo", Email: auth.DemoViewerEmail, PasswordHash: string(hash),
-		}); err != nil {
-			t.Fatalf("CreateCustomer: %v", err)
-		}
-		if _, err := svc.SignInWithEmail(ctx, auth.DemoViewerEmail, "password123"); !errors.Is(err, auth.ErrInvalidCredentials) {
-			t.Fatalf("err = %v, want ErrInvalidCredentials", err)
-		}
-	})
+	// Each demo account holds a matching hash here, as an old seed may have left on
+	// the demo user; sign-in refuses both anyway.
+	for _, email := range []string{auth.DemoViewerEmail, auth.DemoUserEmail} {
+		t.Run("SignInWithEmail_demoAccount_"+email, func(t *testing.T) {
+			if _, err := write.CreateCustomer(ctx, dbwrite.CreateCustomerParams{
+				ID: "cust-" + email, Email: email, PasswordHash: string(hash),
+			}); err != nil {
+				t.Fatalf("CreateCustomer: %v", err)
+			}
+			for _, typed := range []string{email, strings.ToUpper(email)} {
+				if _, err := svc.SignInWithEmail(ctx, typed, "password123"); !errors.Is(err, auth.ErrInvalidCredentials) {
+					t.Fatalf("%s: err = %v, want ErrInvalidCredentials", typed, err)
+				}
+			}
+		})
+	}
 
 	t.Run("JWT_structure", func(t *testing.T) {
 		var claims jwt.RegisteredClaims
@@ -129,7 +136,7 @@ func TestAuthService(t *testing.T) {
 		}
 		// Pin the access token's absolute lifetime. It is not a theft bound (the
 		// client holds both tokens in one localStorage), but a regression to a long
-		// TTL would turn every leaked JWT into a near-permanent credential — SignOut
+		// TTL would turn every leaked JWT into a near-permanent credential: SignOut
 		// revokes the refresh family, never an issued JWT. The band is absolute, not
 		// a ratio to refreshTokenTTL: package auth_test can read neither constant.
 		if claims.ExpiresAt == nil || claims.IssuedAt == nil {
@@ -225,8 +232,8 @@ func TestEmailPublishFailureCountersByKind(t *testing.T) {
 
 	t.Run("unknown", func(t *testing.T) {
 		// Direct PublishEmailJobForTest call with an EmailJob whose Payload
-		// oneof is unset hits the default branch of payloadKindFromJob — the
-		// only counter bucket that fires on proto drift, so it must be
+		// oneof is unset hits the default branch of payloadKindFromJob, whose
+		// bucket is the only one that fires on proto drift, so it must be
 		// observable to operators.
 		svc.PublishEmailJobForTest(ctx, &emailworkerv1.EmailJob{})
 		assertAuthEmailFailureCounter(t, reader, "unknown")
