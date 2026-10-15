@@ -67,7 +67,11 @@ message GetResponse {
 
 message Project {
   string display_name = 1;
-  string fcm_service_json = 2;
+  // 2 was fcm_service_json, the FCM service-account JSON with its private key,
+  // which this message carried to every org role. The key is write-only now:
+  // UpdateFCMServiceJSON sets it and push delivery reads it from the stored row.
+  reserved 2;
+  reserved fcm_service_json;
   string id = 3;
   string org_id = 4;
   // 5 and 6 were private_api_key / public_api_key, back when a project carried a
