@@ -4,12 +4,10 @@ values (@id, @project_id, @kind, @profile_id, @external_id, @requested_by)
 returning *;
 
 -- name: FreezeComplianceRequestIdentifiers :execrows
--- Erase-only: records the resolved distinct_ids + session_ids (and event count)
--- and advances the request to 'processing'. Frozen once so worker retries reuse
--- the same set.
+-- Erase-only: records the resolved distinct_ids (and event count) and advances
+-- the request to 'processing'. Frozen once so worker retries reuse the same set.
 update compliance_requests
 set distinct_ids    = @distinct_ids,
-    session_ids     = @session_ids,
     events_affected = @events_affected,
     status          = 'processing'
 where id = @id and project_id = @project_id;
@@ -30,8 +28,8 @@ where id = @id and project_id = @project_id;
 -- name: ReopenComplianceRequest :execrows
 -- Revives a non-completed erase request so a retry re-drives the same row:
 -- clears any prior error and resets status to 'pending'. Never touches a
--- 'completed' row. Frozen distinct_ids/session_ids are left intact so the
--- re-driven worker pass reuses them.
+-- 'completed' row. Frozen distinct_ids are left intact so the re-driven worker
+-- pass reuses them.
 update compliance_requests
 set status = 'pending', error = null
 where id = @id and project_id = @project_id and status <> 'completed';

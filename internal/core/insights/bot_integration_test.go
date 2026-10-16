@@ -54,7 +54,7 @@ func botSessionsReq(metric insightsv1.SessionMetric, include bool) *insightsv1.Q
 
 // TestIntegrationBotTagging proves migration 012 and the include_bots toggle
 // end to end through real ClickHouse: the promoted bot columns round-trip
-// through the insert path, both rollups key on bot, each query shape below
+// through the insert path, the event rollup keys on bot, each query shape below
 // excludes tagged traffic by default and re-admits it on the toggle, rollup
 // and raw agree in both states, and a session is judged whole.
 func TestIntegrationBotTagging(t *testing.T) {
@@ -130,16 +130,6 @@ func TestIntegrationBotTagging(t *testing.T) {
 			"SELECT bot, sum(cnt) FROM dashboard_event_rollup_daily WHERE project_id = ? AND dim_name = '$__total__' GROUP BY bot", projectID)
 		if want := map[uint8]uint64{0: 2, 1: 1}; !reflect.DeepEqual(got, want) {
 			t.Errorf("$__total__ cnt by bot = %v, want %v", got, want)
-		}
-	})
-
-	t.Run("session_rollup_keyed_by_bot", func(t *testing.T) {
-		for _, kind := range []string{"", "page_view"} {
-			got := countByBot(ctx, t, ch.Conn,
-				"SELECT bot, count(DISTINCT session_id) FROM dashboard_session_rollup WHERE project_id = ? AND kind = ? GROUP BY bot", projectID, kind)
-			if want := map[uint8]uint64{0: 2, 1: 1}; !reflect.DeepEqual(got, want) {
-				t.Errorf("kind=%q sessions by bot = %v, want %v", kind, got, want)
-			}
 		}
 	})
 

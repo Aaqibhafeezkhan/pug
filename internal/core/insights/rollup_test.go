@@ -891,7 +891,7 @@ var botWord = regexp.MustCompile(`\bbot\b`)
 // present in the MV's GROUP BY. The restated event MV must keep the cookieless
 // key, or 011's exclusion silently stops for rows inserted after 012.
 func TestMigration012BotKeyColumns(t *testing.T) {
-	// The session-rollup half is left unpinned: nothing reads that table.
+	// The session-rollup half is left unpinned: migration 014 drops that table.
 	up, _, _ := strings.Cut(migrationUpSection(t, migration012Path), "ALTER TABLE dashboard_session_rollup")
 	for want, count := range map[string]int{
 		"ADD COLUMN IF NOT EXISTS bot        Bool DEFAULT false,":                       1,

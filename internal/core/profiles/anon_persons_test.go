@@ -429,9 +429,6 @@ func TestErasure_ByID_AnonymousPerson(t *testing.T) {
 	if got := chCount(t, ctx, ch, "SELECT count() FROM distinct_id_activity_states WHERE project_id = ? AND distinct_id = ?", projectID, eraseID); got != 0 {
 		t.Errorf("erased anon activity states remain: %d", got)
 	}
-	if got := chCount(t, ctx, ch, "SELECT count() FROM dashboard_session_rollup WHERE project_id = ? AND toString(session_id) = ?", projectID, session); got != 0 {
-		t.Errorf("erased anon session rollup remains: %d", got)
-	}
 	if got := chCount(t, ctx, ch, "SELECT count() FROM events WHERE project_id = ? AND distinct_id = ?", projectID, keepID); got != 1 {
 		t.Errorf("control events = %d, want 1", got)
 	}

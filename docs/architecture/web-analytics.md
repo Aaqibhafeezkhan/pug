@@ -1,9 +1,10 @@
 # Web Analytics
 
 > **Status: SHIPPED.** The code landed in v0.0.4 (2026-07-19) and migrations 008–010 have been
-> applied to production; the deploy runbook below is history, not a plan. The taxonomy has changed
-> once since, in v0.0.18 (2026-08-27, issue #81); what that did to the channel data already stored
-> is in the divergence section. The review amendments are recorded inline (timezone gate, panel
+> applied to production; the deploy runbook below is history, not a plan. Migration 014 later
+> dropped the session rollup that 010 extended. The taxonomy has changed once since, in v0.0.18
+> (2026-08-27, issue #81); what that did to the channel data already stored is in the divergence
+> section. The review amendments are recorded inline (timezone gate, panel
 > scopes, locale normalization, picker widening, UTM column completion in the 008 mutation,
 > mutation↔Derive parity test) and the resolved open-questions log is at the bottom. Defines which
 > event properties get promoted to dedicated ClickHouse columns and which become rollup dimensions
@@ -102,7 +103,7 @@ Migration 010 added entry/exit `argMin`/`argMax` state pairs to `dashboard_sessi
 $pathname  $referrerDomain  $channel  $utmTerm  $utmContent
 ```
 
-(22 → 32 state columns.) Session insights no longer read that rollup: Entry/Exit pages and the
+(22 → 32 state columns.) Migration 014 dropped that rollup: Entry/Exit pages and the
 first-touch acquisition panels run on raw `events`, where these are ordinary promoted columns.
 
 ### Deliberate exclusions
@@ -312,16 +313,14 @@ a different pattern because each has a different merge hazard:
    the merge identity**), so `event_count_state`/`start`/`end` and existing entry/exit states are
    untouched and bounce/duration cannot double. This is the one backfill that is silently
    catastrophic if done naively (re-inserting `countState()` doubles every session's event count);
-   the merge-identity behavior is pinned by
-   `TestIntegrationWebAnalytics/session_rollup_partial_insert_merge_identity`, which re-runs the
-   migration file's own backfill statement against a live session and asserts count/duration/entry-url are
-   byte-stable. The argMin/argMax states themselves are idempotent under duplicate merge, so the
-   MODIFY→INSERT overlap is harmless here.
+   an integration test pinned the merge-identity behavior until migration 014 dropped the rollup.
+   The argMin/argMax states themselves are idempotent under duplicate merge, so the MODIFY→INSERT
+   overlap is harmless here.
 
 **What needs no backfill:** the existing 10 event dims and 11 session dims (untouched), the
 `property_keys` discovery tables, and profiles/aliases. Erasure needs no changes: the event rollup
-is already erasure-exempt by documented decision (anonymous aggregates), and the session rollup is
-deleted row-level by `session_id`, so new state columns ride along.
+is already erasure-exempt by documented decision (anonymous aggregates), and erasure deleted the
+session rollup row-level by `session_id`, so new state columns rode along.
 
 **Deploy runbook (single-step, one normal release).** Ship 008+009+010 and the binaries in one
 gitops commit and sync once. Order is not a choice: `migrate-clickhouse.job.yaml` is an ArgoCD
@@ -416,10 +415,6 @@ scope. → [`insights.md`](insights.md) (Property discovery).
   the frozen mutation predates the google-subdomain gate and the webmail rule, and diverges on hosts
   the corpus does not contain; `TestMutationCorpusStaysWithin008Semantics` (no container) keeps it
   that way (see the taxonomy section).
-- **Merge-identity gate for 010:**
-  `TestIntegrationWebAnalytics/session_rollup_partial_insert_merge_identity`: full-state session
-  via the live MV → re-run the migration file's own partial-column backfill → `countMerge`/duration/`entry_url`
-  unchanged, new `argMin/MaxMerge` correct.
 - **Parity:** `TestIntegrationWebAnalytics/rollup_parity_*` extend the rollup-vs-raw suites
   (trends/top-K on `$pathname`/`$channel`). These run the real migrations via testutil, so MODIFY
   QUERY itself is exercised in CI. The `session_*` subtests check the session panels' values on

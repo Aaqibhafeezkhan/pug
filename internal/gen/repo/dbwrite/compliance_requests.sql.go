@@ -58,27 +58,23 @@ func (q *Queries) CreateComplianceRequest(ctx context.Context, arg CreateComplia
 const freezeComplianceRequestIdentifiers = `-- name: FreezeComplianceRequestIdentifiers :execrows
 update compliance_requests
 set distinct_ids    = $1,
-    session_ids     = $2,
-    events_affected = $3,
+    events_affected = $2,
     status          = 'processing'
-where id = $4 and project_id = $5
+where id = $3 and project_id = $4
 `
 
 type FreezeComplianceRequestIdentifiersParams struct {
 	DistinctIds    []string
-	SessionIds     []string
 	EventsAffected int64
 	ID             string
 	ProjectID      string
 }
 
-// Erase-only: records the resolved distinct_ids + session_ids (and event count)
-// and advances the request to 'processing'. Frozen once so worker retries reuse
-// the same set.
+// Erase-only: records the resolved distinct_ids (and event count) and advances
+// the request to 'processing'. Frozen once so worker retries reuse the same set.
 func (q *Queries) FreezeComplianceRequestIdentifiers(ctx context.Context, arg FreezeComplianceRequestIdentifiersParams) (int64, error) {
 	result, err := q.db.Exec(ctx, freezeComplianceRequestIdentifiers,
 		arg.DistinctIds,
-		arg.SessionIds,
 		arg.EventsAffected,
 		arg.ID,
 		arg.ProjectID,
@@ -144,8 +140,8 @@ type ReopenComplianceRequestParams struct {
 
 // Revives a non-completed erase request so a retry re-drives the same row:
 // clears any prior error and resets status to 'pending'. Never touches a
-// 'completed' row. Frozen distinct_ids/session_ids are left intact so the
-// re-driven worker pass reuses them.
+// 'completed' row. Frozen distinct_ids are left intact so the re-driven worker
+// pass reuses them.
 func (q *Queries) ReopenComplianceRequest(ctx context.Context, arg ReopenComplianceRequestParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reopenComplianceRequest, arg.ID, arg.ProjectID)
 	if err != nil {

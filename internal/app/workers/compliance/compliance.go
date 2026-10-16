@@ -165,7 +165,7 @@ func handleErase(ctx context.Context, svc erasureExecutor, data []byte, lastDeli
 			return permanentEraseError(err, msg)
 		}
 		// Transient PG/CH failure: return for Nak/retry. Frozen identifiers keep
-		// the retry correct even after events are deleted. On the final delivery
+		// the retry correct even after the aliases are deleted. On the final delivery
 		// the framework dead-letters this message and never retries it, so record
 		// the failure on the ledger row now — otherwise the DSAR audit trail is
 		// stuck at 'processing' forever.
