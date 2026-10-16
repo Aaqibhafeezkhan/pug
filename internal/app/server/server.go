@@ -297,9 +297,9 @@ func start(ctx context.Context, d *deps) error {
 	return nil
 }
 
-// serve runs srv until ctx is done, then calls drain and keeps serving for
-// drainDelay so the load balancer can stop routing here before the listener
-// closes. In-flight requests then get 10s; any still running are cut off.
+// serve runs srv until ctx is done, then calls drain and keeps serving for drainDelay
+// so the load balancer can stop routing here before the listener closes. In-flight
+// requests then get 10s, after which their connections close and their contexts cancel.
 func serve(ctx context.Context, srv *http.Server, ln net.Listener, drain func(), drainDelay time.Duration) error {
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()
@@ -311,12 +311,13 @@ func serve(ctx context.Context, srv *http.Server, ln net.Listener, drain func(),
 	}
 
 	drain()
+	slog.InfoContext(ctx, "draining before shutdown", slog.Duration("delay", drainDelay))
 	time.Sleep(drainDelay)
 
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.ErrorContext(shutdownCtx, "server shutdown error", slogx.Error(err)) // puglint:exempt (no span at shutdown)
+		slog.ErrorContext(shutdownCtx, "server shutdown incomplete, closing remaining connections", slogx.Error(err)) // puglint:exempt (no span at shutdown)
 		_ = srv.Close()
 	}
 	if err := <-served; !errors.Is(err, http.ErrServerClosed) {

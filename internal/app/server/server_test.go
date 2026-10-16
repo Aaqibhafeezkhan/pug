@@ -2,12 +2,26 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestServeReturnsServeError(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = ln.Close()
+
+	err = serve(t.Context(), new(http.Server), ln, func() { t.Error("drain ran without a shutdown") }, 0)
+	if err == nil || errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("serve = %v, want the listener's error", err)
+	}
+}
 
 // TestServeDrains pins the shutdown order: drain runs first, requests are still
 // served during the drain delay, and serve waits for an in-flight request (up to

@@ -117,6 +117,7 @@ func newDeps(ctx context.Context) (*deps, error) {
 	pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
 	defer cancelPing()
 	if err := pgW.Ping(pingCtx); err != nil {
+		slog.ErrorContext(ctx, "unable to ping postgres", slogx.Error(err)) // puglint:exempt (no span at startup)
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
 
