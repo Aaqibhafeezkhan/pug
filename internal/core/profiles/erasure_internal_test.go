@@ -19,7 +19,7 @@ import (
 // TestFreezeIdentifiers_EmptyRequestRefuses pins the DSAR-correctness guard: a
 // request that resolves to no external_id and no profile must fail with
 // ErrNoErasableIdentifiers rather than freeze an empty set and let the worker
-// mark it 'completed' — a completed erasure that deleted nothing would silently
+// mark it 'completed', a completed erasure that deleted nothing would silently
 // misreport fulfilment. A unit test (no infra): an all-empty request never
 // reaches ClickHouse, so resolveDistinctIDs returns empty and the guard fires.
 func TestFreezeIdentifiers_EmptyRequestRefuses(t *testing.T) {
@@ -53,14 +53,10 @@ func TestChInClause(t *testing.T) {
 	}
 }
 
-// TestErasure_FrozenIdentifiersSurviveEventDeletion is the crash-recovery
-// guarantee that the freeze-on-first-pass design exists for: once a request has
-// frozen its session_ids, a retry must use the FROZEN set to erase the session
-// rollup even though the events those ids were read from are already deleted (a
-// re-resolution would now return nothing). Internal because it sets the frozen
-// state directly via the write queries; the external acceptance test only covers
-// the clean single-pass + already-completed re-run.
-func TestErasure_FrozenIdentifiersSurviveEventDeletion(t *testing.T) {
+// TestErasure_FrozenIdentifiersSurviveAliasDeletion pins that a retry erases by
+// the FROZEN distinct_ids: once a pass has deleted the alias rows, re-resolving
+// would miss the alias ids.
+func TestErasure_FrozenIdentifiersSurviveAliasDeletion(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
@@ -91,53 +87,38 @@ func TestErasure_FrozenIdentifiersSurviveEventDeletion(t *testing.T) {
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
-	const distinctID = "frozen@example.com"
-	session := uuid.NewString()
+	const (
+		externalID = "frozen@example.com"
+		aliasID    = "anon-frozen-1"
+	)
 	for range 3 {
-		testutil.InsertEvent(ctx, t, ch.Conn, uuid.NewString(), projectID, distinctID, "page_view", session,
+		testutil.InsertEvent(ctx, t, ch.Conn, uuid.NewString(), projectID, aliasID, "page_view", uuid.NewString(),
 			map[string]string{}, map[string]string{}, now)
 	}
 
 	svc := NewService(pg.PgW, ch.Conn, natsClient)
 
-	// Frozen request, no deletes yet — the state after pass 1 froze identifiers
-	// but then crashed mid-erase.
+	// No profile_aliases row, so only the frozen set names aliasID.
 	requestID := xid.New().String()
 	if _, err := svc.write.CreateComplianceRequest(ctx, dbwrite.CreateComplianceRequestParams{
 		ID: requestID, ProjectID: projectID, Kind: string(ComplianceKindErase),
-		ExternalID: postgres.NewOptionalText(distinctID),
+		ExternalID: postgres.NewOptionalText(externalID),
 	}); err != nil {
 		t.Fatalf("create request: %v", err)
 	}
 	if _, err := svc.write.FreezeComplianceRequestIdentifiers(ctx, dbwrite.FreezeComplianceRequestIdentifiersParams{
 		ID: requestID, ProjectID: projectID,
-		DistinctIds: []string{distinctID}, SessionIds: []string{session}, EventsAffected: 3,
+		DistinctIds: []string{externalID, aliasID}, EventsAffected: 3,
 	}); err != nil {
 		t.Fatalf("freeze identifiers: %v", err)
 	}
 
-	// Simulate "events already deleted by the crashed pass": now a re-resolution
-	// of session_ids from events would return nothing.
-	if err := svc.execMutation(ctx,
-		"ALTER TABLE events DELETE WHERE project_id = ? AND distinct_id = ?", projectID, distinctID); err != nil {
-		t.Fatalf("simulate event delete: %v", err)
-	}
-	if got := chCountInternal(t, ctx, ch, "SELECT count() FROM events WHERE project_id = ? AND distinct_id = ?", projectID, distinctID); got != 0 {
-		t.Fatalf("setup: events not deleted: %d", got)
-	}
-	// The session rollup survives the event delete (insert-triggered MV).
-	if got := chCountInternal(t, ctx, ch,
-		"SELECT count() FROM dashboard_session_rollup WHERE project_id = ? AND toString(session_id) = ?", projectID, session); got == 0 {
-		t.Fatal("setup: session rollup empty; cannot prove frozen-id deletion")
-	}
-
-	// Re-drive: must erase the session rollup via the FROZEN session id.
 	if err := svc.ExecuteErasure(ctx, projectID, requestID); err != nil {
 		t.Fatalf("ExecuteErasure: %v", err)
 	}
 	if got := chCountInternal(t, ctx, ch,
-		"SELECT count() FROM dashboard_session_rollup WHERE project_id = ? AND toString(session_id) = ?", projectID, session); got != 0 {
-		t.Errorf("session rollup remains: %d (frozen session id was not used on retry)", got)
+		"SELECT count() FROM events WHERE project_id = ? AND distinct_id = ?", projectID, aliasID); got != 0 {
+		t.Errorf("alias events remain: %d (frozen distinct_ids were not used on retry)", got)
 	}
 }
 
@@ -146,8 +127,8 @@ func TestErasure_FrozenIdentifiersSurviveEventDeletion(t *testing.T) {
 // (ClickHouse has none), so a crash after some stores are deleted leaves the rest
 // behind. A retry must re-run every (idempotent) mutation off the frozen set and
 // drive the request to 'completed'. Here we delete only the events table to
-// simulate a first pass that died before clearing the activity-state and session
-// rollups, then assert the retry cleans them and marks the row completed.
+// simulate a first pass that died before clearing the activity-state rollup,
+// then assert the retry cleans it and marks the row completed.
 func TestErasure_PartialEraseRetryCompletes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -196,7 +177,7 @@ func TestErasure_PartialEraseRetryCompletes(t *testing.T) {
 	}
 	if _, err := svc.write.FreezeComplianceRequestIdentifiers(ctx, dbwrite.FreezeComplianceRequestIdentifiersParams{
 		ID: requestID, ProjectID: projectID,
-		DistinctIds: []string{distinctID}, SessionIds: []string{session}, EventsAffected: 3,
+		DistinctIds: []string{distinctID}, EventsAffected: 3,
 	}); err != nil {
 		t.Fatalf("freeze identifiers: %v", err)
 	}
@@ -219,10 +200,6 @@ func TestErasure_PartialEraseRetryCompletes(t *testing.T) {
 	if got := chCountInternal(t, ctx, ch,
 		"SELECT count() FROM distinct_id_activity_states WHERE project_id = ? AND distinct_id = ?", projectID, distinctID); got != 0 {
 		t.Errorf("activity state remains: %d", got)
-	}
-	if got := chCountInternal(t, ctx, ch,
-		"SELECT count() FROM dashboard_session_rollup WHERE project_id = ? AND toString(session_id) = ?", projectID, session); got != 0 {
-		t.Errorf("session rollup remains: %d", got)
 	}
 
 	req, err := svc.read.GetEraseRequestByID(ctx, dbread.GetEraseRequestByIDParams{ID: requestID, ProjectID: projectID})
@@ -305,7 +282,6 @@ func TestErasure_MarkErasureFailedPersistsState(t *testing.T) {
 	svc := NewService(pg.PgW, ch.Conn, natsClient)
 
 	const distinctID = "fail-me@example.com"
-	session := uuid.NewString()
 	requestID := xid.New().String()
 	if _, err := svc.write.CreateComplianceRequest(ctx, dbwrite.CreateComplianceRequestParams{
 		ID: requestID, ProjectID: projectID, Kind: string(ComplianceKindErase),
@@ -315,7 +291,7 @@ func TestErasure_MarkErasureFailedPersistsState(t *testing.T) {
 	}
 	if _, err := svc.write.FreezeComplianceRequestIdentifiers(ctx, dbwrite.FreezeComplianceRequestIdentifiersParams{
 		ID: requestID, ProjectID: projectID,
-		DistinctIds: []string{distinctID}, SessionIds: []string{session}, EventsAffected: 7,
+		DistinctIds: []string{distinctID}, EventsAffected: 7,
 	}); err != nil {
 		t.Fatalf("freeze identifiers: %v", err)
 	}
@@ -348,14 +324,11 @@ func TestErasure_MarkErasureFailedPersistsState(t *testing.T) {
 	if len(got.DistinctIds) != 1 || got.DistinctIds[0] != distinctID {
 		t.Errorf("distinct_ids = %v, want frozen [%s] to survive the failure", got.DistinctIds, distinctID)
 	}
-	if len(got.SessionIds) != 1 || got.SessionIds[0] != session {
-		t.Errorf("session_ids = %v, want frozen [%s] to survive the failure", got.SessionIds, session)
-	}
 }
 
 // TestErasure_FreezeGuardAbortsOnMissingRow pins finding C3: if the freeze UPDATE
 // matches 0 rows (the ledger row vanished), freezeIdentifiers must abort with
-// ErrComplianceRequestVanished BEFORE any destructive delete — the complement of
+// ErrComplianceRequestVanished BEFORE any destructive delete, the complement of
 // the no-identifiers guard. Here the request row is never created, so the freeze
 // write affects 0 rows.
 func TestErasure_FreezeGuardAbortsOnMissingRow(t *testing.T) {

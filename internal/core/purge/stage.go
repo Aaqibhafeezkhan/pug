@@ -21,7 +21,6 @@ var tables = []Table{
 	{Name: "profile_aliases"},
 	{Name: "distinct_id_activity_states"},
 	{Name: "dashboard_event_rollup_daily"},
-	{Name: "dashboard_session_rollup"},
 	{Name: "event_names"},
 	{Name: "property_keys_event_buckets"},
 	{Name: "property_keys_profile_current", Rebuilt: true},

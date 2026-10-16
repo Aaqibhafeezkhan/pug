@@ -34,17 +34,17 @@ import (
 var (
 	ErrDeletionRequestNotFound = errors.New("profiles: deletion request not found")
 	// ErrNoErasableIdentifiers is returned when a request resolves to neither an
-	// external_id nor a profile — it can never identify data to erase, so it must
+	// external_id nor a profile, it can never identify data to erase, so it must
 	// fail rather than complete as a no-op.
 	ErrNoErasableIdentifiers = errors.New("profiles: erasure request resolved no identifiers")
 	// ErrComplianceRequestVanished is returned when a guarded ledger write (freeze or
-	// completion) matches 0 rows — the row was concurrently removed or its (id,
+	// completion) matches 0 rows, the row was concurrently removed or its (id,
 	// project_id, kind) no longer matches. The freeze guard prevents a destructive
 	// delete with no surviving audit row; the completion guard prevents reporting a
 	// phantom 'completed' that never landed in the ledger.
 	ErrComplianceRequestVanished = errors.New("profiles: compliance request row vanished before write")
 	// ErrDegradedAliasErasure is returned when an erase-by-id resolves through an
-	// alias to a canonical that has no live profile row AND is itself an alias —
+	// alias to a canonical that has no live profile row AND is itself an alias,
 	// i.e. the subject spans an alias CHAIN whose full identifier fan-out cannot
 	// be frozen by single-level resolution. Rather than silently erase only the
 	// presented id's residual events and report the DSAR 'completed' (a partial
@@ -105,14 +105,6 @@ func (s ComplianceStatus) isTerminal() bool { return s == ComplianceStatusComple
 // open and are simply re-published.
 func (s ComplianceStatus) canReopen() bool { return s == ComplianceStatusFailed }
 
-// erasureScope is the frozen identifier fan-out for one erasure: the distinct_id
-// set (events + per-distinct_id rollups) and the session_id set (session rollup),
-// bundled so the two transposable []string slices can't be swapped at a call site.
-type erasureScope struct {
-	distinctIDs []string
-	sessionIDs  []string
-}
-
 // Postgres open-status unique indexes (migration 015) that dedup concurrent
 // first-time requests for the same subject.
 const (
@@ -137,14 +129,14 @@ func isComplianceOpenRequestConflict(err error) bool {
 // RequestErasureByID enqueues erasure of the data subject identified by a
 // person id (the dashboard "delete this profile" path). The id can name an
 // identified profile (PostgreSQL row), a derived anonymous person (the id IS
-// the events distinct_id — no Postgres row exists), an alias claimed by an
+// the events distinct_id, no Postgres row exists), an alias claimed by an
 // identify merge (the canonical data subject is erased), or an external_id a
 // caller picked up from an events row. An id that resolves to none of these
 // returns ErrProfileNotFound.
 func (s *Service) RequestErasureByID(ctx context.Context, projectID, profileID, requestedBy string) (string, ComplianceStatus, error) {
 	// Idempotency / re-drive: reuse an existing non-completed erase request for
 	// this profile rather than creating a duplicate ledger row. This must run
-	// before the profile lookup below — the prelude soft-deletes the profile, so
+	// before the profile lookup below, the prelude soft-deletes the profile, so
 	// a retry after the first request would otherwise 404 here and lose the only
 	// path to re-drive a failed erasure.
 	if requestID, status, ok, err := s.reopenErasure(ctx, projectID, profileID, ""); err != nil {
@@ -161,7 +153,7 @@ func (s *Service) RequestErasureByID(ctx context.Context, projectID, profileID, 
 	case err == nil:
 		return s.requestErasure(ctx, projectID, profile.ExternalID.String, profile.ID, requestedBy)
 	case errors.Is(err, pgx.ErrNoRows):
-		// No PostgreSQL profile — the id may still name a real person in
+		// No PostgreSQL profile, the id may still name a real person in
 		// ClickHouse. Resolve below.
 		return s.requestErasureByUnresolvedID(ctx, projectID, profileID, requestedBy)
 	default:
@@ -175,12 +167,12 @@ func (s *Service) RequestErasureByID(ctx context.Context, projectID, profileID, 
 // requestErasureByUnresolvedID handles a by-id erasure whose id has no
 // PostgreSQL profile row. Three legitimate shapes reach here, tried in order:
 //
-//  1. an alias claimed by an identify merge — the data subject is the
+//  1. an alias claimed by an identify merge, the data subject is the
 //     canonical profile, so erase that (its fan-out covers this alias);
 //  2. an id that is actually an external_id (event rows display external_ids
-//     as the user key post-identify) — route to the external_id path, which
+//     as the user key post-identify), route to the external_id path, which
 //     resolves the profile and its full fan-out itself;
-//  3. a derived anonymous person — the id IS the events distinct_id; erase by
+//  3. a derived anonymous person, the id IS the events distinct_id; erase by
 //     the bare id, which touches no Postgres profile/device rows: the ledger
 //     row is written as for every shape, but the prelude's soft-delete +
 //     device-deactivate and the worker's hard-deletes all match zero rows for
@@ -195,7 +187,7 @@ func (s *Service) requestErasureByUnresolvedID(ctx context.Context, projectID, i
 	if s.ch == nil {
 		// No ClickHouse conn wired: the derived-person store is unreachable, so
 		// we cannot tell whether this id names a subject. Fail loud (matching
-		// getSingle) rather than reporting ErrProfileNotFound — on an erasure a
+		// getSingle) rather than reporting ErrProfileNotFound, on an erasure a
 		// false "not found" would tell a controller the subject has no data when
 		// the system merely could not check.
 		return "", "", errors.New("profiles: clickhouse conn is nil")
@@ -229,7 +221,7 @@ func (s *Service) requestErasureByUnresolvedID(ctx context.Context, projectID, i
 			//   - terminal (not an alias): a real canonical whose own erasure
 			//     already completed. The bare-id fall-through cleans up any
 			//     residual events for the presented id and returns
-			//     ErrProfileNotFound when there are none — correct and safe.
+			//     ErrProfileNotFound when there are none, correct and safe.
 			//   - chained (itself an alias): the subject spans an alias chain
 			//     (id → canonicalID → …) whose full identifier fan-out
 			//     single-level resolution cannot freeze. Erasing only the
@@ -274,7 +266,7 @@ func (s *Service) requestErasureByUnresolvedID(ctx context.Context, projectID, i
 	case err == nil:
 		return s.RequestErasureByExternalID(ctx, projectID, id, requestedBy)
 	case errors.Is(err, pgx.ErrNoRows):
-		// Not an external_id either — last shape below.
+		// Not an external_id either, last shape below.
 	default:
 		slog.ErrorContext(ctx, "failed resolving profile by external_id for erasure", slogx.Error(err),
 			slog.String("external_id", id), slog.String("project_id", projectID))
@@ -306,9 +298,9 @@ func (s *Service) requestErasureByUnresolvedID(ctx context.Context, projectID, i
 // events plainly exist. Erasure asked the rollup anyway and answered
 // ErrProfileNotFound for real data.
 //
-// That mattered once it became clear a controller can SEE these ids —
+// That mattered once it became clear a controller can SEE these ids,
 // GetEventExplorer and GetActivityFeed both return distinct_id without the
-// rollup's cookieless filter (a bot-tagged one needs include_bots) — so
+// rollup's cookieless filter (a bot-tagged one needs include_bots), so
 // "not found" was reachable from a UI, on an Art. 17 obligation, for data the
 // system was still holding. Cookieless ids therefore probe the events table
 // directly. Pinned by TestErasure_ByID_CookielessIsErasable.
@@ -327,14 +319,14 @@ func (s *Service) hasErasableActivity(ctx context.Context, projectID, distinctID
 }
 
 // hasActivity reports whether any activity rollup rows exist for the
-// distinct_id — the same source that surfaces it as a derived anonymous person
+// distinct_id, the same source that surfaces it as a derived anonymous person
 // on the read path, so erasure-by-id accepts every id Profiles surfaces from
 // that rollup.
 //
 // It is a superset of "is listed as a person", not an exact match: it does not
 // re-apply the read path's claim exclusion, so (e.g.) a distinct_id reached via
 // the degraded-alias fall-through is erasable without being separately listed.
-// It is NOT a valid probe for cookieless ids — see hasErasableActivity, which
+// It is NOT a valid probe for cookieless ids, see hasErasableActivity, which
 // routes those to the events table instead.
 func (s *Service) hasActivity(ctx context.Context, projectID, distinctID string) (bool, error) {
 	var n uint64
@@ -349,12 +341,12 @@ func (s *Service) hasActivity(ctx context.Context, projectID, distinctID string)
 
 // RequestErasureByExternalID enqueues erasure of the data subject identified by
 // external_id (the controller-facing handle). It proceeds even when no profile
-// row resolves — events can be keyed directly by external_id, and those must
+// row resolves, events can be keyed directly by external_id, and those must
 // still be erased.
 func (s *Service) RequestErasureByExternalID(ctx context.Context, projectID, externalID, requestedBy string) (string, ComplianceStatus, error) {
 	// An empty external_id can never name a subject: anonymous rows carry a NULL
 	// external_id, and the compliance_requests CHECK forbids an all-null row.
-	// Mirror GetByExternalID and the by-id empty guard — report a clean
+	// Mirror GetByExternalID and the by-id empty guard, report a clean
 	// not-found rather than tripping the CHECK constraint as an opaque internal
 	// error.
 	if externalID == "" {
@@ -377,7 +369,7 @@ func (s *Service) RequestErasureByExternalID(ctx context.Context, projectID, ext
 	case err == nil:
 		profileID = profile.ID
 	case errors.Is(err, pgx.ErrNoRows):
-		// No profile — events keyed directly by external_id are still erased.
+		// No profile, events keyed directly by external_id are still erased.
 		slog.InfoContext(ctx, "erasure requested for external_id with no profile row",
 			slog.String("external_id", externalID), slog.String("project_id", projectID))
 	default:
@@ -424,7 +416,7 @@ func (s *Service) requestErasure(ctx context.Context, projectID, externalID, pro
 	}); err != nil {
 		// A concurrent first-time request for the same subject won the open-status
 		// unique index (migration 015). This is the concurrent twin of the sequential
-		// reopen gate at the top — abandon this tx and re-drive the winner instead of
+		// reopen gate at the top, abandon this tx and re-drive the winner instead of
 		// surfacing a duplicate-key error. Not logged as an error: it's an expected,
 		// handled race, not a fault.
 		if isComplianceOpenRequestConflict(err) {
@@ -478,7 +470,7 @@ func (s *Service) requestErasure(ctx context.Context, projectID, externalID, pro
 	if err := s.publishErase(ctx, projectID, requestID, profileID, externalID); err != nil {
 		// The request row is durably committed; only the enqueue failed (already
 		// logged + recorded in publishErase). Surface the error so the caller can
-		// retry — the record of intent is not lost, and a retry reuses this pending
+		// retry, the record of intent is not lost, and a retry reuses this pending
 		// row via reopenErasure rather than creating a duplicate.
 		return requestID, ComplianceStatusPending, err
 	}
@@ -545,7 +537,7 @@ func (s *Service) reopenErasure(ctx context.Context, projectID, profileID, exter
 	}
 	if err := s.publishErase(ctx, projectID, existing.ID, exProfileID, exExternalID); err != nil {
 		// The row is intact; only the re-enqueue failed (logged + recorded in
-		// publishErase). Surface the error so the caller can retry — a retry reuses
+		// publishErase). Surface the error so the caller can retry, a retry reuses
 		// this same row via reopenErasure.
 		return existing.ID, status, true, err
 	}
@@ -558,7 +550,7 @@ func (s *Service) reopenErasure(ctx context.Context, projectID, profileID, exter
 
 // ExecuteErasure performs the irreversible hard erasure for a deletion request.
 // It is idempotent and retry-safe: the resolved identifiers are frozen on the
-// first pass, so a redelivery after events are deleted still cleans every store.
+// first pass, so a redelivery after the aliases are deleted still cleans every store.
 func (s *Service) ExecuteErasure(ctx context.Context, projectID, requestID string) error {
 	req, err := s.read.GetEraseRequestByID(ctx, dbread.GetEraseRequestByIDParams{
 		ID:        requestID,
@@ -590,9 +582,9 @@ func (s *Service) ExecuteErasure(ctx context.Context, projectID, requestID strin
 		return nil
 	}
 
-	scope := erasureScope{distinctIDs: req.DistinctIds, sessionIDs: req.SessionIds}
-	if len(scope.distinctIDs) == 0 {
-		scope, err = s.freezeIdentifiers(ctx, &req)
+	distinctIDs := req.DistinctIds
+	if len(distinctIDs) == 0 {
+		distinctIDs, err = s.freezeIdentifiers(ctx, &req)
 		if err != nil {
 			return err
 		}
@@ -603,7 +595,7 @@ func (s *Service) ExecuteErasure(ctx context.Context, projectID, requestID strin
 		profileID = req.ProfileID.String
 	}
 
-	// PostgreSQL hard deletes — devices BEFORE the profile (the profile_id FK is
+	// PostgreSQL hard deletes, devices BEFORE the profile (the profile_id FK is
 	// ON DELETE SET NULL; deleting the profile first would orphan device rows
 	// holding the push token + endpoint).
 	if profileID != "" {
@@ -612,7 +604,7 @@ func (s *Service) ExecuteErasure(ctx context.Context, projectID, requestID strin
 		}
 	}
 
-	if err := s.eraseClickHouse(ctx, projectID, profileID, scope); err != nil {
+	if err := s.eraseClickHouse(ctx, projectID, profileID, distinctIDs); err != nil {
 		return err
 	}
 
@@ -641,7 +633,7 @@ func (s *Service) ExecuteErasure(ctx context.Context, projectID, requestID strin
 
 	slog.InfoContext(ctx, "data subject erasure completed",
 		slog.String("request_id", requestID), slog.String("project_id", projectID),
-		slog.Int("distinct_ids", len(scope.distinctIDs)), slog.Int("session_ids", len(scope.sessionIDs)))
+		slog.Int("distinct_ids", len(distinctIDs)))
 	return nil
 }
 
@@ -715,35 +707,31 @@ func (s *Service) ListStuckComplianceRequests(ctx context.Context, olderThan tim
 	return rows, nil
 }
 
-// freezeIdentifiers resolves the full distinct_id fan-out and the session_ids
-// (read from events BEFORE they are deleted) and persists them onto the request
-// row so retries reuse the frozen set. Any resolution failure aborts without
+// freezeIdentifiers resolves the full distinct_id fan-out and persists it onto
+// the request row, so retries reuse the frozen set after the erasure has deleted
+// the aliases it was resolved from. Any resolution failure aborts without
 // persisting, so a retry re-resolves cleanly.
-func (s *Service) freezeIdentifiers(ctx context.Context, req *dbread.ComplianceRequest) (erasureScope, error) {
+func (s *Service) freezeIdentifiers(ctx context.Context, req *dbread.ComplianceRequest) ([]string, error) {
 	distinctIDs, err := s.resolveDistinctIDs(ctx, req)
 	if err != nil {
-		return erasureScope{}, err
+		return nil, err
 	}
 
 	if len(distinctIDs) == 0 {
-		// Neither an external_id nor a resolvable profile — there is nothing to key
+		// Neither an external_id nor a resolvable profile, there is nothing to key
 		// the erasure on. The RPCs always set at least one identifier, so this is a
 		// corrupt request. Fail it (the worker marks the row failed) rather than
-		// freezing an empty set and marking it 'completed' — a completed erasure
+		// freezing an empty set and marking it 'completed', a completed erasure
 		// that deleted nothing would silently misreport DSAR fulfilment.
 		slog.ErrorContext(ctx, "erasure request resolved no identifiers; refusing to complete",
 			slog.String("request_id", req.ID), slog.String("project_id", req.ProjectID))
 		telemetry.RecordError(ctx, ErrNoErasableIdentifiers)
-		return erasureScope{}, ErrNoErasableIdentifiers
+		return nil, ErrNoErasableIdentifiers
 	}
 
-	sessionIDs, err := s.resolveSessionIDs(ctx, req.ProjectID, distinctIDs)
-	if err != nil {
-		return erasureScope{}, err
-	}
 	eventsIdentified, err := s.countEvents(ctx, req.ProjectID, distinctIDs)
 	if err != nil {
-		return erasureScope{}, err
+		return nil, err
 	}
 
 	// Guard the freeze with its rows-affected count: this UPDATE advances the row to
@@ -755,26 +743,25 @@ func (s *Service) freezeIdentifiers(ctx context.Context, req *dbread.ComplianceR
 		ID:             req.ID,
 		ProjectID:      req.ProjectID,
 		DistinctIds:    distinctIDs,
-		SessionIds:     sessionIDs,
 		EventsAffected: int64(eventsIdentified),
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "failed freezing erasure identifiers", slogx.Error(err),
 			slog.String("request_id", req.ID), slog.String("project_id", req.ProjectID))
 		telemetry.RecordError(ctx, err)
-		return erasureScope{}, err
+		return nil, err
 	}
 	if frozen == 0 {
 		slog.ErrorContext(ctx, "erasure freeze matched no rows; aborting before any delete",
 			slog.String("request_id", req.ID), slog.String("project_id", req.ProjectID))
 		telemetry.RecordError(ctx, ErrComplianceRequestVanished)
-		return erasureScope{}, ErrComplianceRequestVanished
+		return nil, ErrComplianceRequestVanished
 	}
-	return erasureScope{distinctIDs: distinctIDs, sessionIDs: sessionIDs}, nil
+	return distinctIDs, nil
 }
 
 // resolveDistinctIDs builds the complete set of events.distinct_id values for the
-// subject: the external_id (always, when present) and — when a profile exists —
+// subject: the external_id (always, when present) and, when a profile exists,
 // the profile id and every alias_id. For anonymous profiles the id IS the
 // distinct_id; post-identify the external_id and the anon alias_ids are.
 func (s *Service) resolveDistinctIDs(ctx context.Context, req *dbread.ComplianceRequest) ([]string, error) {
@@ -820,41 +807,6 @@ func (s *Service) resolveAliasIDs(ctx context.Context, projectID, profileID stri
 		return nil, err
 	}
 	return aliasIDs, nil
-}
-
-// resolveSessionIDs collects the subject's session_ids, batching the distinct_id
-// IN list (S1) so a huge fan-out can't blow ClickHouse max_query_size. SELECT
-// DISTINCT only dedups within a batch, so cross-batch duplicates are removed here.
-func (s *Service) resolveSessionIDs(ctx context.Context, projectID string, distinctIDs []string) ([]string, error) {
-	seen := make(map[string]struct{})
-	var sessionIDs []string
-	err := forEachBatch(distinctIDs, func(batch []string) error {
-		inClause, inArgs := chInClause(batch)
-		args := append([]any{projectID}, inArgs...)
-		ids, err := s.selectStrings(ctx,
-			"SELECT DISTINCT toString(session_id) FROM events WHERE project_id = ? AND distinct_id IN "+inClause,
-			args...,
-		)
-		if err != nil {
-			return err
-		}
-		for _, id := range ids {
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-			sessionIDs = append(sessionIDs, id)
-		}
-		return nil
-	})
-	if err != nil {
-		err = fmt.Errorf("resolve session ids: %w", err)
-		slog.ErrorContext(ctx, "failed resolving session ids for erasure", slogx.Error(err),
-			slog.String("project_id", projectID))
-		telemetry.RecordError(ctx, err)
-		return nil, err
-	}
-	return sessionIDs, nil
 }
 
 // selectStrings runs a single-column ClickHouse query and collects the column
@@ -956,31 +908,23 @@ func (s *Service) hardDeletePostgres(ctx context.Context, projectID, profileID s
 }
 
 // eraseClickHouse hard-deletes every ClickHouse store that holds the subject's
-// data. dashboard_event_rollup_daily is intentionally NOT touched — it has no
+// data. dashboard_event_rollup_daily is intentionally NOT touched, it has no
 // per-person key (decision "a"). That is pseudonymisation, not anonymisation:
 // uniq_state is an AggregateFunction(uniq, String) over distinct_id, so it keeps
 // a stable per-person token and a candidate id can be tested for membership by
 // merging it in and comparing cardinality. Reaching that needs direct ClickHouse
-// access — no API exposes raw state or arbitrary SQL — so it is defence-in-depth,
-// not an exposed surface. The
-// per-distinct_id and per-session rollups are insert-triggered MVs, so deleting
-// from events does not propagate — they must be deleted explicitly here. Each
-// IN-list mutation is batched (S1) so a huge fan-out can't blow max_query_size,
-// and every CH failure is recorded at this detect site (I1).
-func (s *Service) eraseClickHouse(ctx context.Context, projectID, profileID string, scope erasureScope) error {
-	// session_id is a UUID column; compare as string to avoid a UUID/String
-	// supertype error on the IN literals.
-	if err := s.eraseByBatch(ctx, "erase session rollup", projectID, scope.sessionIDs, func(in string) string {
-		return "ALTER TABLE dashboard_session_rollup DELETE WHERE project_id = ? AND toString(session_id) IN " + in
-	}); err != nil {
-		return err
-	}
-	if err := s.eraseByBatch(ctx, "erase events", projectID, scope.distinctIDs, func(in string) string {
+// access, no API exposes raw state or arbitrary SQL, so it is defence-in-depth,
+// not an exposed surface. The per-distinct_id rollup is an insert-triggered MV,
+// so deleting from events does not propagate; it must be deleted explicitly
+// here. Each IN-list mutation is batched (S1) so a huge fan-out can't blow
+// max_query_size, and every CH failure is recorded at this detect site (I1).
+func (s *Service) eraseClickHouse(ctx context.Context, projectID, profileID string, distinctIDs []string) error {
+	if err := s.eraseByBatch(ctx, "erase events", projectID, distinctIDs, func(in string) string {
 		return "ALTER TABLE events DELETE WHERE project_id = ? AND distinct_id IN " + in
 	}); err != nil {
 		return err
 	}
-	if err := s.eraseByBatch(ctx, "erase activity states", projectID, scope.distinctIDs, func(in string) string {
+	if err := s.eraseByBatch(ctx, "erase activity states", projectID, distinctIDs, func(in string) string {
 		return "ALTER TABLE distinct_id_activity_states DELETE WHERE project_id = ? AND distinct_id IN " + in
 	}); err != nil {
 		return err
@@ -1001,7 +945,7 @@ func (s *Service) eraseClickHouse(ctx context.Context, projectID, profileID stri
 	// as profile rows by the demo seeder. For a no-profile external_id erasure
 	// this also removes any stray row keyed by that external_id. Ids that key
 	// no profile row simply match nothing.
-	if err := s.eraseByBatch(ctx, "erase profiles", projectID, scope.distinctIDs, func(in string) string {
+	if err := s.eraseByBatch(ctx, "erase profiles", projectID, distinctIDs, func(in string) string {
 		return "ALTER TABLE profiles DELETE WHERE project_id = ? AND id IN " + in
 	}); err != nil {
 		return err
@@ -1027,7 +971,7 @@ func (s *Service) eraseByBatch(ctx context.Context, op, projectID string, ids []
 // recordEraseError wraps, logs, and records a ClickHouse erase failure at the
 // detect site (CLAUDE.md: the detecting layer pairs slog.ErrorContext with
 // telemetry.RecordError; ExecuteErasure and the worker only translate). Without
-// this the most safety-critical path — a failed erasure mutation — was
+// this the most safety-critical path, a failed erasure mutation, was
 // observability-blind.
 func (s *Service) recordEraseError(ctx context.Context, op, projectID string, err error) error {
 	wrapped := fmt.Errorf("%s: %w", op, err)
@@ -1038,7 +982,7 @@ func (s *Service) recordEraseError(ctx context.Context, op, projectID string, er
 }
 
 // execMutation runs a ClickHouse heavyweight ALTER ... DELETE with
-// mutations_sync = 1 so the call blocks until the rows are physically removed —
+// mutations_sync = 1 so the call blocks until the rows are physically removed,
 // required to prove erasure. (ClickHouse's lightweight DELETE FROM only marks
 // rows and defers physical removal to a later merge, so it can't prove erasure;
 // mutations_sync does not apply to it.)
@@ -1092,9 +1036,9 @@ func chInClause(values []string) (string, []any) {
 }
 
 // chBatchSize bounds the IN-list size per ClickHouse statement (S1). A subject with
-// a large alias/session fan-out would otherwise produce one giant (?, ?, …) query
-// that can exceed max_query_size / the max-AST-elements limit and fail the mutation
-// — retried forever until the DLQ, never completing. A distinct_id binds as ~1
+// a large alias fan-out would otherwise produce one giant (?, ?, …) query
+// that can exceed max_query_size / the max-AST-elements limit and fail the mutation,
+// retried forever until the DLQ, never completing. A distinct_id binds as ~1
 // placeholder + a few dozen bytes (a 20-byte xid, a ~41-byte anon-<uuid>), so
 // 1000 ids stays well under the 256 KiB default.
 const chBatchSize = 1000
