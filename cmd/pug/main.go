@@ -175,7 +175,7 @@ var emailCmd = &cobra.Command{
 	Run:   run(emailworker.Run),
 }
 
-// Scheduled jobs. Unlike `pug worker`, these run once and exit — non-zero when
+// Scheduled jobs. Unlike `pug worker`, these run once and exit, non-zero when
 // the pass failed, which is a k8s CronJob's only success signal.
 var cronCmd = &cobra.Command{
 	Use:   "cron",
@@ -274,6 +274,10 @@ var devCmd = &cobra.Command{
 			slog.WarnContext(sigCtx, "failed to disable worker health endpoint for dev",
 				slog.String("env", natsworker.HealthAddrEnv), slogx.Error(err))
 		}
+		// No load balancer routes to a local server, so Ctrl+C needn't wait out a drain.
+		if err := os.Setenv("PUG_SERVER_DRAIN_DELAY", "0s"); err != nil {
+			slog.WarnContext(sigCtx, "failed to disable the server drain delay for dev", slogx.Error(err))
+		}
 
 		port := os.Getenv("PUG_SERVER_PORT")
 		if port == "" {
@@ -312,8 +316,8 @@ var devCmd = &cobra.Command{
 		// Listed but not started: both are CronJobs in deploys, so dev has to say so,
 		// or usage reads back as "never metered" and deleted projects keep their data.
 		fmt.Println(bold + "Jobs:" + reset)
-		fmt.Println("  "+yellow+"Usage metering:"+reset, "not scheduled — run", cyan+"pug cron usage"+reset, "for one pass")
-		fmt.Println("  "+yellow+"Project purge:"+reset, "not scheduled — run", cyan+"pug cron purge"+reset, "for one pass")
+		fmt.Println("  "+yellow+"Usage metering:"+reset, "not scheduled; run", cyan+"pug cron usage"+reset, "for one pass")
+		fmt.Println("  "+yellow+"Project purge:"+reset, "not scheduled; run", cyan+"pug cron purge"+reset, "for one pass")
 		fmt.Println()
 
 		fmt.Println(green + "  Press Ctrl+C to stop" + reset)
@@ -366,7 +370,7 @@ var seedCmd = &cobra.Command{
 		"event-gated flow as the demo worker: ensure the demo account, backfill\n" +
 		"events, seed Postgres profiles for only the users that produced events,\n" +
 		"and copy them into ClickHouse. Profiles therefore exist only for users\n" +
-		"with events — matching `pug worker demo`.",
+		"with events, matching `pug worker demo`.",
 	Run: func(cmd *cobra.Command, args []string) {
 		ctx, done := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer done()

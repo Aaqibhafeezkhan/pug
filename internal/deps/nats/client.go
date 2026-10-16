@@ -22,7 +22,7 @@ type Config struct {
 	ConsumersConfig string `env:"NATS_CONSUMERS_CONFIG,default=schema/nats/consumers.yaml"`
 	// StreamReplicas is the replica count the migrate job applies to every stream.
 	// It lives in the environment rather than streams.yaml because the correct
-	// value differs per deployment — a standalone server must stay at 1 (enforced
+	// value differs per deployment: a standalone server must stay at 1 (enforced
 	// by checkReplicaSupport, not by the server), and streams.yaml is baked into
 	// the image, so it cannot vary.
 	StreamReplicas int `env:"NATS_STREAM_REPLICAS,default=1"`
@@ -71,7 +71,9 @@ func New(ctx context.Context) (*NATSClient, error) {
 		return nil, fmt.Errorf("failed to process NATS configuration: %w", err)
 	}
 
-	opts := []nats.Option{nats.Name("pug-nats-client")}
+	// nats.go's default closes the connection for good after 60 failed reconnects per
+	// server (two minutes or more), and nothing redials it.
+	opts := []nats.Option{nats.Name("pug-nats-client"), nats.MaxReconnects(-1)}
 
 	if cfg.JWT != "" && cfg.Seed != "" {
 		opts = append(opts, nats.UserJWTAndSeed(cfg.JWT, cfg.Seed))
@@ -101,6 +103,12 @@ func New(ctx context.Context) (*NATSClient, error) {
 // established. Used by readiness probes; a closed/reconnecting conn is not ready.
 func (nc *NATSClient) IsConnected() bool {
 	return nc.conn != nil && nc.conn.IsConnected()
+}
+
+// IsClosed reports whether the connection has closed for good, which nats.go still
+// does on a repeated auth error or an unknown server error despite unlimited reconnects.
+func (nc *NATSClient) IsClosed() bool {
+	return nc.conn == nil || nc.conn.IsClosed()
 }
 
 // ClusterName returns the connected server's cluster name, or "" when the server
