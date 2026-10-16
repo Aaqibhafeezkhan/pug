@@ -292,8 +292,8 @@ The usage page already labels an id it cannot name "Unknown project (id…)".
 
 ## Retention
 
-Retention has its own design, [data-retention.md](data-retention.md). It will
-run as its own daily job, not inside this pass.
+Retention has its own design, [data-retention.md](data-retention.md). It runs as
+its own daily job, not inside this pass.
 
 GDPR erasure could move onto the ClickHouse stage. It still blocks on
 `mutations_sync = 1`, which is what decision 6 is about.
