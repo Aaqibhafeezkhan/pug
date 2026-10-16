@@ -106,11 +106,6 @@ func TestErasure_FullEraseReachesEventsAndRollups(t *testing.T) {
 		projectID, externalID, anonID); got == 0 {
 		t.Fatal("distinct_id_activity_states empty after seeding; MV did not populate")
 	}
-	if got := chCount(t, ctx, ch,
-		"SELECT count() FROM dashboard_session_rollup WHERE project_id = ? AND toString(session_id) IN (?, ?)",
-		projectID, s1, s2); got == 0 {
-		t.Fatal("dashboard_session_rollup empty after seeding; MV did not populate")
-	}
 
 	svc := profiles.NewService(pg.PgW, ch.Conn, natsClient)
 
@@ -146,16 +141,6 @@ func TestErasure_FullEraseReachesEventsAndRollups(t *testing.T) {
 		"SELECT count() FROM distinct_id_activity_states WHERE project_id = ? AND distinct_id = ?",
 		projectID, keepExtID); got == 0 {
 		t.Error("control activity state was deleted")
-	}
-	if got := chCount(t, ctx, ch,
-		"SELECT count() FROM dashboard_session_rollup WHERE project_id = ? AND toString(session_id) IN (?, ?)",
-		projectID, s1, s2); got != 0 {
-		t.Errorf("session rollup rows remain: %d", got)
-	}
-	if got := chCount(t, ctx, ch,
-		"SELECT count() FROM dashboard_session_rollup WHERE project_id = ? AND toString(session_id) = ?",
-		projectID, s3); got == 0 {
-		t.Error("control session rollup was deleted")
 	}
 
 	// Profile, aliases, devices: gone (CH + PG); control profile survives.
@@ -230,7 +215,7 @@ func TestErasure_ByExternalIDWithNoProfile(t *testing.T) {
 	const ghostID = "ghost@example.com"
 	session := uuid.NewString()
 
-	// Events only — no profile row, no alias.
+	// Events only, no profile row, no alias.
 	for range 4 {
 		testutil.InsertEvent(ctx, t, ch.Conn, uuid.NewString(), projectID, ghostID, "page_view", session,
 			map[string]string{}, map[string]string{}, now)
@@ -247,10 +232,6 @@ func TestErasure_ByExternalIDWithNoProfile(t *testing.T) {
 
 	if got := chCount(t, ctx, ch, "SELECT count() FROM events WHERE project_id = ? AND distinct_id = ?", projectID, ghostID); got != 0 {
 		t.Errorf("events remain for no-profile erasure: %d", got)
-	}
-	if got := chCount(t, ctx, ch,
-		"SELECT count() FROM dashboard_session_rollup WHERE project_id = ? AND toString(session_id) = ?", projectID, session); got != 0 {
-		t.Errorf("session rollup remains for no-profile erasure: %d", got)
 	}
 	dr, err := svc.GetDeletionRequest(ctx, projectID, requestID)
 	if err != nil {
@@ -270,7 +251,7 @@ func TestErasure_ByExternalIDWithNoProfile(t *testing.T) {
 // TestErasure_ByID_FullErase pins the dashboard "delete this profile" entry
 // point (RequestErasureByID): the hard erasure must reach the events across the
 // full distinct_id fan-out (profile id + external_id + alias), the profile, and
-// the alias — not just the synchronous prelude.
+// the alias, not just the synchronous prelude.
 func TestErasure_ByID_FullErase(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -415,6 +396,12 @@ func TestErasure_CrossProjectIsolation(t *testing.T) {
 		}
 	}
 
+	if got := chCount(t, ctx, ch,
+		"SELECT count() FROM distinct_id_activity_states WHERE project_id = ? AND distinct_id = ?",
+		projectB, sharedExtID); got == 0 {
+		t.Fatal("project B activity state empty after seeding; MV did not populate")
+	}
+
 	svc := profiles.NewService(pg.PgW, ch.Conn, natsClient)
 	requestID, _, err := svc.RequestErasureByExternalID(ctx, projectA, sharedExtID, "")
 	if err != nil {
@@ -433,8 +420,9 @@ func TestErasure_CrossProjectIsolation(t *testing.T) {
 		t.Errorf("project B events = %d, want 3 (cross-project erasure leak)", got)
 	}
 	if got := chCount(t, ctx, ch,
-		"SELECT count() FROM dashboard_session_rollup WHERE project_id = ? AND toString(session_id) = ?", projectB, sessionB); got == 0 {
-		t.Error("project B session rollup deleted (cross-project leak)")
+		"SELECT count() FROM distinct_id_activity_states WHERE project_id = ? AND distinct_id = ?",
+		projectB, sharedExtID); got == 0 {
+		t.Error("project B activity state deleted (cross-project erasure leak)")
 	}
 	if got := chCount(t, ctx, ch, "SELECT count() FROM profiles WHERE project_id = ? AND id = ?", projectB, profileB); got != 1 {
 		t.Errorf("project B ch profile = %d, want 1", got)
@@ -567,7 +555,7 @@ func pgCount(t *testing.T, ctx context.Context, pg *testutil.TestPostgres, query
 // cookieless id it can see.
 //
 // Migration 011 keeps cookieless- ids out of distinct_id_activity_states_mv, and
-// hasActivity probes exactly that rollup — so bare-id erasure used to report
+// hasActivity probes exactly that rollup, so bare-id erasure used to report
 // ErrProfileNotFound for an id whose events demonstrably exist. The original
 // rationale ("a cookieless id is unknowable to its own visitor, so no data
 // subject can present one") is true of a VISITOR-initiated DSAR but says nothing
@@ -608,7 +596,7 @@ func TestErasure_ByID_CookielessIsErasable(t *testing.T) {
 			sessions[did], map[string]string{}, map[string]string{}, now)
 	}
 
-	// Migration 011's WHERE still holds — the id is invisible to the activity
+	// Migration 011's WHERE still holds, the id is invisible to the activity
 	// rollup. Erasure must succeed anyway, which is the whole point.
 	if got := chCount(t, ctx, ch,
 		"SELECT count() FROM distinct_id_activity_states WHERE project_id = ? AND distinct_id = ?",
@@ -620,21 +608,12 @@ func TestErasure_ByID_CookielessIsErasable(t *testing.T) {
 		projectID, controlID); got != 1 {
 		t.Fatalf("control activity rows = %d, want 1", got)
 	}
-	// Migration 011 deliberately leaves the session rollup unfiltered, so a
-	// cookieless visitor DOES have rows there — the one store where 011's
-	// "deliberately untouched" decision creates cookieless-specific residue on a
-	// compliance surface. Erasure has to clear it.
-	if got := chCount(t, ctx, ch,
-		"SELECT count() FROM dashboard_session_rollup WHERE project_id = ? AND session_id = ?",
-		projectID, sessions[cookielessID]); got == 0 {
-		t.Fatal("expected cookieless session-rollup rows to exist before erasure")
-	}
 
 	svc := profiles.NewService(pg.PgW, ch.Conn, natsClient)
 
 	requestID, status, err := svc.RequestErasureByID(ctx, projectID, cookielessID, "")
 	if err != nil {
-		t.Fatalf("RequestErasureByID(cookieless) = %v, want success — an id an admin can SEE must be erasable", err)
+		t.Fatalf("RequestErasureByID(cookieless) = %v, want success, an id an admin can SEE must be erasable", err)
 	}
 	if status != profiles.ComplianceStatusPending {
 		t.Errorf("status = %q, want pending", status)
@@ -651,11 +630,6 @@ func TestErasure_ByID_CookielessIsErasable(t *testing.T) {
 		"SELECT count() FROM events WHERE project_id = ? AND distinct_id = ?",
 		projectID, cookielessID); got != 0 {
 		t.Errorf("cookieless events = %d after erasure, want 0", got)
-	}
-	if got := chCount(t, ctx, ch,
-		"SELECT count() FROM dashboard_session_rollup WHERE project_id = ? AND session_id = ?",
-		projectID, sessions[cookielessID]); got != 0 {
-		t.Errorf("cookieless session-rollup rows = %d after erasure, want 0", got)
 	}
 
 	// The consented control through the identical entry point still works, and is
@@ -712,7 +686,7 @@ func TestErasure_ByID_BotTaggedIsErasable(t *testing.T) {
 
 	requestID, status, err := svc.RequestErasureByID(ctx, projectID, botID, "")
 	if err != nil {
-		t.Fatalf("RequestErasureByID(bot-tagged) = %v, want success — erasure must stay bot-blind", err)
+		t.Fatalf("RequestErasureByID(bot-tagged) = %v, want success, erasure must stay bot-blind", err)
 	}
 	if status != profiles.ComplianceStatusPending {
 		t.Errorf("status = %q, want pending", status)

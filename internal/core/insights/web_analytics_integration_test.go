@@ -26,11 +26,10 @@ import (
 	"github.com/pug-sh/pug/internal/testutil"
 )
 
-// TestIntegrationWebAnalytics covers the migration-008/009/010 web-analytics
-// surfaces: the 008 derivation mutation's parity with attribution.Derive, the
-// 010 partial-column backfill's merge-identity safety, rollup-vs-raw parity on
-// the new event dimensions, and session metrics on the new session dimensions
-// + AVG_EVENTS_PER_SESSION.
+// TestIntegrationWebAnalytics covers the migration-008/009 web-analytics
+// surfaces: the 008 derivation mutation's parity with attribution.Derive,
+// rollup-vs-raw parity on the new event dimensions, and session metrics on the
+// new session dimensions + AVG_EVENTS_PER_SESSION.
 func TestIntegrationWebAnalytics(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -46,10 +45,6 @@ func TestIntegrationWebAnalytics(t *testing.T) {
 	// to the corpus assertions (dedicated project ids keep them apart).
 	t.Run("mutation_008_matches_attribution_derive", func(t *testing.T) {
 		testMutation008DeriveParity(t, ctx, ch)
-	})
-
-	t.Run("session_rollup_partial_insert_merge_identity", func(t *testing.T) {
-		testSessionRollupPartialInsertMergeIdentity(t, ctx, ch)
 	})
 
 	// Also table-wide (its DELETE + INSERT rebuild every project's new dims
@@ -689,73 +684,6 @@ func testMutation008DeriveParity(t *testing.T, ctx context.Context, ch *testutil
 	}
 	if referrerResidue == 0 {
 		t.Error("the mutation cleared more than '$locale' from auto_properties; the other promoted keys are copied verbatim and must stay, or this becomes an unreviewed map rewrite")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// 010 partial-column backfill merge identity
-// ---------------------------------------------------------------------------
-
-func testSessionRollupPartialInsertMergeIdentity(t *testing.T, ctx context.Context, ch *testutil.TestClickHouse) {
-	const projectID = "proj_mergeid"
-	sessionID := "00000000-0000-0000-0000-00000000ae01"
-	base := time.Date(2024, 2, 1, 10, 0, 0, 0, time.UTC)
-
-	// One two-event session flowing through the live MV (full states).
-	for i, path := range []string{"/landing", "/checkout"} {
-		if err := insertWebEvent(ctx, ch, projectID, "ida", sessionID, base.Add(time.Duration(i)*5*time.Minute), webProps{
-			pathname: path, channel: "Organic Search", referrerDomain: "google.com", url: "https://pugandpals.example.com" + path,
-		}); err != nil {
-			t.Fatalf("seed session event: %v", err)
-		}
-	}
-
-	type snapshot struct {
-		count           uint64
-		durationSeconds int64
-		entryURL        string
-		entryPathname   string
-		exitPathname    string
-	}
-	read := func() snapshot {
-		var s snapshot
-		if err := ch.Conn.QueryRow(ctx, `
-			SELECT
-				countMerge(event_count_state),
-				dateDiff('second', minMerge(start_state), maxMerge(end_state)),
-				argMinMerge(entry_url_state),
-				argMinMerge(entry_pathname_state),
-				argMaxMerge(exit_pathname_state)
-			FROM dashboard_session_rollup
-			WHERE project_id = ? AND kind = '' AND session_id = toUUID(?)`,
-			projectID, sessionID,
-		).Scan(&s.count, &s.durationSeconds, &s.entryURL, &s.entryPathname, &s.exitPathname); err != nil {
-			t.Fatalf("read session rollup: %v", err)
-		}
-		return s
-	}
-
-	before := read()
-	if before.count != 2 || before.durationSeconds != 300 {
-		t.Fatalf("baseline session wrong: %+v (want 2 events, 300s)", before)
-	}
-	if before.entryPathname != "/landing" || before.exitPathname != "/checkout" {
-		t.Fatalf("baseline entry/exit pathname wrong: %+v", before)
-	}
-
-	// Re-run migration 010's partial-column backfill INSERT verbatim. Omitted
-	// AggregateFunction columns must take the empty state (the merge identity),
-	// so count/duration/entry_url stay EXACTLY as before; the argMin/argMax
-	// states are idempotent under the duplicate merge.
-	backfill := extractMigrationStatement(t, "010_extend_dashboard_session_rollup.sql",
-		`(?s)INSERT INTO dashboard_session_rollup \(.*?GROUP BY project_id, kind, session_id`)
-	if err := ch.Conn.Exec(ctx, backfill); err != nil {
-		t.Fatalf("exec 010 partial backfill: %v", err)
-	}
-
-	after := read()
-	if after != before {
-		t.Errorf("partial-column insert corrupted merged state:\nbefore: %+v\nafter:  %+v", before, after)
 	}
 }
 
