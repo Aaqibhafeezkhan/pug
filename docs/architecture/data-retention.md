@@ -12,10 +12,10 @@ a time.
 Today nothing deletes. Every org resolves a length (phase 1), which
 `GetBillingStatus` and `pug billing show` report.
 
-Free orgs keep 1 year and paying orgs 5 years. Production runs with billing off,
-so nothing goes there until billing is turned on, unless an org is given its
-own length. Events that a wrong device clock dated years back go at an org's
-first cut, since `occur_time` has no lower bound. The dry run shows them first.
+Free orgs keep 1 year and paying orgs 5 years. Production runs with billing on,
+so these lengths apply there once phase 3 switches deletes on. Events that a
+wrong device clock dated years back go at an org's first cut, since
+`occur_time` has no lower bound. The dry run shows them first.
 
 ## The length
 
@@ -212,8 +212,7 @@ rollups, and deleting profiles.
    never starts deleting on its own.
 5. **Profiles stay.** Recommended. They are identity, not history.
 6. **No customer notice yet.** Recommended for now: production deletes nothing
-   while billing is off. Turning billing on starts every free org's 30-day wait
-   at once, so the pricing announcement should state the 1-year free length.
+   until phase 3, and the pricing page already states the 1-year free length.
 7. **The switch, off by default.** Recommended.
 8. **Billing sets the default with billing on: 1 year free, 5 years paying.**
    Recommended. The alternative is `PUG_RETENTION_DAYS` everywhere: simpler, but
