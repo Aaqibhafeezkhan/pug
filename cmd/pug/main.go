@@ -197,7 +197,7 @@ var cronPurgeCmd = &cobra.Command{
 
 var cronRetentionCmd = &cobra.Command{
 	Use:   "retention",
-	Short: "Run a pass deleting event history past each org's retention",
+	Short: "Run a retention pass; with PUG_RETENTION_ENABLED off it only logs what it would delete",
 	Run:   run(retentioncron.Run),
 }
 

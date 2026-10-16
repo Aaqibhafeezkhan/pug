@@ -4,15 +4,18 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	"github.com/google/uuid"
 	"github.com/rs/xid"
 
 	"github.com/pug-sh/pug/internal/core/billing"
 	"github.com/pug-sh/pug/internal/core/billing/entitlement"
 	"github.com/pug-sh/pug/internal/core/retention"
+	chdb "github.com/pug-sh/pug/internal/deps/clickhouse"
 	"github.com/pug-sh/pug/internal/gen/repo/dbwrite"
 	"github.com/pug-sh/pug/internal/testutil"
 )
@@ -197,6 +200,49 @@ func TestPassFailsOnAFailingDelete(t *testing.T) {
 	if err := f.service(t, billing.Config{}, true).Pass(t.Context(), t0.Add(month)); !errors.Is(err, retention.ErrDeleteFailing) {
 		t.Errorf("Pass = %v, want ErrDeleteFailing", err)
 	}
+}
+
+// A delete that fails to queue holds back only its own cut.
+func TestPassQueuesTheOtherCutsPastAFailedDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	f := newFixture(t)
+	longer, due := f.org(t, 365), f.org(t, 90)
+	f.seedState(t, longer, 365)
+	f.seedState(t, due, 90)
+	p, q := f.project(t, longer), f.project(t, due)
+	f.event(t, p, "gone", "gone", uuid.NewString(), time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC))
+	f.event(t, q, "gone", "gone", uuid.NewString(), old)
+
+	ents, err := entitlement.NewService(f.pg.PgW, f.pg.PgW, billing.Config{})
+	if err != nil {
+		t.Fatalf("entitlement.NewService: %v", err)
+	}
+	conn := &chdb.Conn{Conn: &failFirstDelete{Conn: f.ch.Conn.Conn}}
+	if err := retention.NewService(f.pg.PgW, conn, ents, retention.Config{Enabled: true}).Pass(t.Context(), t0.Add(month)); err == nil {
+		t.Fatal("Pass = nil, want the refused delete")
+	}
+	// Two cuts, so two deletes on events: one refused, one queued.
+	if n := f.count(t, `SELECT count() FROM system.mutations WHERE database = currentDatabase() AND table = 'events'
+		AND (position(command, ?) > 0 OR position(command, ?) > 0)`, p, q); n != 1 {
+		t.Errorf("deletes queued on events = %d, want 1: the refused one held up the other cut's", n)
+	}
+}
+
+// failFirstDelete refuses the first delete on events and passes the rest on.
+type failFirstDelete struct {
+	driver.Conn
+	failed bool
+}
+
+func (c *failFirstDelete) Exec(ctx context.Context, query string, args ...any) error {
+	if !c.failed && strings.HasPrefix(query, "ALTER TABLE events DELETE") {
+		c.failed = true
+		return errors.New("refused")
+	}
+	return c.Conn.Exec(ctx, query, args...)
 }
 
 // An org that stops paying keeps its paid length until an operator expires it.

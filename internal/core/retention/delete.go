@@ -135,11 +135,13 @@ func (s *Service) cutTable(ctx context.Context, t table, byCut map[time.Time][]s
 	if s.cfg.Enabled {
 		msg = "retention deletes"
 	}
+	var errs []error
 	for _, d := range queue {
 		ids := slices.Sorted(maps.Keys(d.rows))
 		if s.cfg.Enabled {
 			if err := s.queueDelete(ctx, t, ids, d.cut); err != nil {
-				return err
+				errs = append(errs, err)
+				continue
 			}
 		}
 		for _, id := range ids {
@@ -147,7 +149,7 @@ func (s *Service) cutTable(ctx context.Context, t table, byCut map[time.Time][]s
 				slog.String("project_id", id), slog.Time("before", d.cut), slog.Uint64("rows", d.rows[id]))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // rowsBefore counts each project's rows dated before cut, leaving out projects
