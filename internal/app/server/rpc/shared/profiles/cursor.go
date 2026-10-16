@@ -10,10 +10,9 @@ import (
 	coreprofiles "github.com/pug-sh/pug/internal/core/profiles"
 )
 
-// profileListCursor is a keyset pagination cursor for the profiles list. It
-// encodes the sort it was issued under and the last returned row's value in
-// that sort's column (coreprofiles.ListSortValue) and id: the seek point for
-// the next page. Matches the ORDER BY <sort column> DESC, id DESC.
+// profileListCursor is a page token: the sort, and the last row's sort key and
+// id. The key (epoch milliseconds) stays a Time so every token already issued
+// still decodes.
 type profileListCursor struct {
 	Sort coreprofiles.ListSort `json:"s"`
 	Time time.Time             `json:"t"`
@@ -30,7 +29,6 @@ func (c *profileListCursor) encode() (string, error) {
 }
 
 // decodeProfileListCursor decodes a base64url-encoded JSON page token.
-// Returns an error if the token is malformed or missing required fields.
 func decodeProfileListCursor(token string) (*profileListCursor, error) {
 	b, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {

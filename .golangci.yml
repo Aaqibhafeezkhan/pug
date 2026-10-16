@@ -50,6 +50,14 @@ linters:
           deny:
             - pkg: github.com/pug-sh/pug/internal/core/billing
               desc: the paths listed above must not consult billing; a quota never drops an event
+        # redisotel writes command arguments into its spans unless told not to, and
+        # callers pass secrets as arguments. NewFromConfig turns that off, and this
+        # rule keeps it the one place a Redis client is instrumented.
+        redis-tracing-in-one-place:
+          files: ["!**/internal/deps/redis/**"]
+          deny:
+            - pkg: github.com/redis/go-redis/extra/redisotel
+              desc: instrument Redis through internal/deps/redis.NewFromConfig, which keeps command arguments out of spans
         deps-is-domain-free:
           files:
             - "**/internal/deps/**"

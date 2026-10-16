@@ -65,17 +65,15 @@ Only ClickHouse event history.
 | `events` | its `occur_time` is before the cut |
 | `dashboard_event_rollup_daily` | its `day` is before the cut |
 | `property_keys_event_buckets` | its `bucket_time` is before the cut |
-| `dashboard_session_rollup` | the session ended before the cut |
 | `distinct_id_activity_states` | the person's last event is before the cut |
 | `event_names` | the name was last seen before the cut |
 
-The last three hold merged states. Each data part keeps its own partial row per
-key, and a delete checks rows one at a time. So these three are cut by key:
+The last two hold merged states. Each data part keeps its own partial row per
+key, and a delete checks rows one at a time. So these two are cut by key:
 `(project_id, <id>) IN (select … group by project_id, <id> having maxMerge(<state>) < cut)`,
-with `<id>` the session, the person or the event name. The id leaves out `bot`,
-and `kind` for sessions, since those split one session or person over several
-rows. A session or a person on both sides of the cut stays whole, all-time
-counts included. Checked on ClickHouse 26.5, where a row-level
+with `<id>` the person or the event name. The id leaves out `bot`, since it
+splits one person over several rows. A person on both sides of the cut stays
+whole, all-time counts included. Checked on ClickHouse 26.5, where a row-level
 `finalizeAggregation(<state>) < cut` dropped the older part's counts instead.
 
 Profiles, aliases, devices, usage rows, dashboards and ledgers stay.
@@ -181,7 +179,7 @@ off, so turning the switch on starts no new waits.
 
 1. `events` and `property_keys_event_buckets` are partitioned by month, so a cut
    rewrites only the month it removes.
-2. The other four tables are not, so each is rewritten once a month per length
+2. The other three tables are not, so each is rewritten once a month per length
    in use. On cloud that is at least two: free and paying.
 3. An erasure queued behind a retention delete waits for it, as with project
    deletion.

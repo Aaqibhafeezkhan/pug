@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,9 +25,11 @@ import (
 )
 
 const (
-	testEmail    = "woof@pug.sh"
-	testPassword = "goodboy"
-	testName     = "Pug"
+	// The demo user owns the demo org and its project. It has no password, and the
+	// server keeps it read-only (coreauth.IsDemoAccount): its password was once
+	// published, and a database seeded back then holds it until seedAccount runs.
+	userEmail = coreauth.DemoUserEmail
+	userName  = "Pug"
 
 	// A second demo account with read-only (viewer) access to the same org so the
 	// viewer role can be exercised in the dashboard. Snoop Pugg snoops: looks but
@@ -34,6 +38,12 @@ const (
 	// login target are one constant and cannot drift apart.
 	viewerEmail = coreauth.DemoViewerEmail
 	viewerName  = "Snoop Pugg"
+
+	// The demo org's admin, created only when PUG_DEMO_ADMIN_PASSWORD is set, so a
+	// usable admin exists only where an operator chose its password. The address
+	// can't receive mail (RFC 2606's .example).
+	adminEmail = "admin@pug.example"
+	adminName  = "Pug Admin"
 )
 
 type Seeder struct {
@@ -50,20 +60,45 @@ func NewSeeder(deps *deps) *Seeder {
 // Profile seeding is a separate, event-gated step (SeedProfilesForUsers) so a
 // profile is only ever created for a user that has events.
 func (s *Seeder) seedAccount(ctx context.Context) (dbread.Project, error) {
+	project, err := s.demoProject(ctx)
+	if err != nil {
+		return dbread.Project{}, err
+	}
+	// Runs whether the demo user is new or found, so setting the password later
+	// still gives an existing demo org its admin.
+	if err := s.ensureAdmin(ctx, project.OrgID); err != nil {
+		return dbread.Project{}, err
+	}
+	return project, nil
+}
+
+// demoProject resolves the demo user's project, or creates the demo user, org
+// and project on a fresh database.
+func (s *Seeder) demoProject(ctx context.Context) (dbread.Project, error) {
 	read := dbread.New(s.deps.pg)
 
-	slog.InfoContext(ctx, "checking for existing test user")
+	slog.InfoContext(ctx, "checking for existing demo user")
 
-	customer, err := read.GetCustomerByEmail(ctx, testEmail)
+	customer, err := read.GetCustomerByEmail(ctx, userEmail)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return dbread.Project{}, fmt.Errorf("failed to check existing user: %w", err)
 	}
 	if err == nil {
-		slog.InfoContext(ctx, "test user already exists, resolving project")
+		// A seed from before the demo user lost its password left the published
+		// hash behind. Sign-in refuses the account anyway; this removes the hash.
+		if customer.PasswordHash != "" {
+			if _, err := dbwrite.New(s.deps.pg).UpdateCustomerPasswordHash(ctx, dbwrite.UpdateCustomerPasswordHashParams{
+				ID: customer.ID, PasswordHash: "",
+			}); err != nil {
+				return dbread.Project{}, fmt.Errorf("failed to clear the demo user's old password: %w", err)
+			}
+			slog.InfoContext(ctx, "cleared the demo user's old password")
+		}
+		slog.InfoContext(ctx, "demo user already exists, resolving project")
 		return s.resolveProject(ctx, read, customer.ID)
 	}
 
-	slog.InfoContext(ctx, "creating test user", slog.String("email", testEmail))
+	slog.InfoContext(ctx, "creating demo user", slog.String("email", userEmail))
 	project, privateKey, err := s.seedCustomerOrgProject(ctx)
 	if err != nil {
 		return dbread.Project{}, err
@@ -71,12 +106,125 @@ func (s *Seeder) seedAccount(ctx context.Context) (dbread.Project, error) {
 	// Only the private key's digest is stored, so this log is the one and only
 	// place it appears. If it is missed, mint another from the project settings
 	// page rather than reaching for the database. The project's public key is not
-	// logged — unlike this one it stays readable, via ListApiKeys.
+	// logged: unlike this one it stays readable, via ListApiKeys.
 	slog.DebugContext(ctx, "account seed complete",
 		slog.String("project_id", project.ID),
 		slog.String("private_api_key", privateKey),
 	)
 	return project, nil
+}
+
+// ensureAdmin gives the demo org an admin when PUG_DEMO_ADMIN_PASSWORD is set,
+// since both demo accounts are read-only. It creates the account if missing. An
+// existing account gets its admin role back only while its password matches the
+// variable, since an account at that address need not be the one the seeder
+// created. It never changes the account's password or logs it.
+func (s *Seeder) ensureAdmin(ctx context.Context, orgID string) error {
+	if s.deps.adminPassword == "" {
+		slog.InfoContext(ctx, "PUG_DEMO_ADMIN_PASSWORD is not set, so the seeder creates or restores no demo admin")
+		return nil
+	}
+	existing, err := dbread.New(s.deps.pg).GetCustomerByEmail(ctx, adminEmail)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return s.createAdmin(ctx, orgID)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to check existing admin: %w", err)
+	}
+	// The seeder always sets a password, and nothing clears one, so an account
+	// without one came from a passwordless sign-in. No value of the variable can
+	// match it.
+	if existing.PasswordHash == "" {
+		slog.WarnContext(ctx, "an account with no password holds the demo admin's address, so the seeder "+
+			"didn't create it and won't make it the admin; check where it came from",
+			slog.String("email", adminEmail), slog.String("customer_id", existing.ID))
+		return nil
+	}
+	err = bcrypt.CompareHashAndPassword([]byte(existing.PasswordHash), []byte(s.deps.adminPassword))
+	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+		slog.WarnContext(ctx, "the account at the demo admin's address doesn't have PUG_DEMO_ADMIN_PASSWORD as its "+
+			"password, so the seeder leaves its role alone; if you changed it in the dashboard, unset the "+
+			"variable or set it to match, which needs a password of 16 characters or more",
+			slog.String("email", adminEmail))
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to check the demo admin's password: %w", err)
+	}
+	return s.restoreAdmin(ctx, orgID, existing.ID)
+}
+
+// createAdmin creates the admin account with PUG_DEMO_ADMIN_PASSWORD as its
+// password, as the demo org's admin.
+func (s *Seeder) createAdmin(ctx context.Context, orgID string) error {
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(s.deps.adminPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash the admin password: %w", err)
+	}
+
+	tx, err := s.deps.pg.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	w := dbwrite.New(tx)
+	admin, err := w.CreateCustomer(ctx, dbwrite.CreateCustomerParams{
+		ID:           xid.New().String(),
+		Email:        adminEmail,
+		DisplayName:  adminName,
+		PasswordHash: string(passwordHash),
+		PictureUri:   "",
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create admin customer: %w", err)
+	}
+	if _, err := w.CreateOrgMember(ctx, dbwrite.CreateOrgMemberParams{
+		OrgID:      orgID,
+		CustomerID: admin.ID,
+		Role:       coreorgs.RoleAdmin.String(),
+	}); err != nil {
+		return fmt.Errorf("failed to add admin to org: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit admin seed: %w", err)
+	}
+	slog.InfoContext(ctx, "created demo admin", slog.String("email", adminEmail))
+	return nil
+}
+
+// restoreAdmin makes the existing admin account the demo org's admin again. The
+// demo user counts as an admin, so the last-admin guard lets this one leave, be
+// removed or be demoted, and each is undone here. ensureAdmin calls it only
+// while the account's password matches PUG_DEMO_ADMIN_PASSWORD.
+func (s *Seeder) restoreAdmin(ctx context.Context, orgID, customerID string) error {
+	w := dbwrite.New(s.deps.pg)
+	added, err := w.CreateOrgMemberIfAbsent(ctx, dbwrite.CreateOrgMemberIfAbsentParams{
+		CustomerID: customerID, OrgID: orgID, Role: coreorgs.RoleAdmin.String(),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to re-add the admin to the demo org: %w", err)
+	}
+	if added > 0 {
+		slog.WarnContext(ctx, "the demo admin had left or been removed from the demo org, so the seeder added it back",
+			slog.String("email", adminEmail))
+		return nil
+	}
+	role, err := dbread.New(s.deps.pg).GetOrgMemberRole(ctx, dbread.GetOrgMemberRoleParams{OrgID: orgID, CustomerID: customerID})
+	if err != nil {
+		return fmt.Errorf("failed to read the admin's role: %w", err)
+	}
+	if role == coreorgs.RoleAdmin.String() {
+		return nil
+	}
+	if _, err := w.UpdateOrgMemberRole(ctx, dbwrite.UpdateOrgMemberRoleParams{
+		Role: coreorgs.RoleAdmin.String(), OrgID: orgID, CustomerID: customerID,
+	}); err != nil {
+		return fmt.Errorf("failed to restore the admin's role: %w", err)
+	}
+	slog.WarnContext(ctx, "the demo admin had been demoted, so the seeder made it the admin again",
+		slog.String("email", adminEmail), slog.String("was", role))
+	return nil
 }
 
 // seedProfilesForUsers seeds Postgres profiles, devices and merges for exactly
@@ -94,13 +242,13 @@ func (s *Seeder) seedProfilesForUsers(ctx context.Context, projectID string, ind
 	//     and a profile never exists without events). A crash after events commit
 	//     but before/during the ClickHouse copy is reconciled one level up by
 	//     ensureSeed (healDemoProfiles re-drives the idempotent copy from the
-	//     Postgres set) rather than looping back through here — so the worker
+	//     Postgres set) rather than looping back through here, so the worker
 	//     never re-seeds Postgres against a stale partial set.
 	//   - The CLI `seed --no-reset` path clears the demo profiles first
 	//     (ResetDemoProfiles), so it falls through to a real re-seed.
 	// A finer completion marker wouldn't help: synthetic events/merges carry
 	// random ids the ReplacingMergeTree can't dedup across runs, so re-running
-	// repairs nothing — a manual reset (`pug seed`) is the documented recovery.
+	// repairs nothing; a manual reset (`pug seed`) is the documented recovery.
 	var existing int64
 	if err := s.deps.pg.QueryRow(ctx,
 		"SELECT count(*) FROM profiles WHERE project_id = $1 AND id LIKE 'user-%'", projectID,
@@ -128,22 +276,51 @@ func (s *Seeder) seedProfilesForUsers(ctx context.Context, projectID string, ind
 	return nil
 }
 
+// resolveProject finds the demo project in the org the demo user shares with
+// the demo viewer, as the seeder created them together. The demo user's first
+// org alone could be one created while its password was public, and taking it
+// would send the demo's traffic there.
 func (s *Seeder) resolveProject(ctx context.Context, read *dbread.Queries, customerID string) (dbread.Project, error) {
 	orgs, err := read.GetOrgsByCustomerID(ctx, customerID)
 	if err != nil {
 		return dbread.Project{}, fmt.Errorf("failed to query orgs for customer %s: %w", customerID, err)
 	}
-	if len(orgs) == 0 {
-		return dbread.Project{}, fmt.Errorf("no orgs found for customer %s", customerID)
-	}
-	projects, err := read.GetProjectsByOrgID(ctx, orgs[0].ID)
+	orgID, err := demoOrgID(ctx, read, orgs)
 	if err != nil {
-		return dbread.Project{}, fmt.Errorf("failed to query projects for org %s: %w", orgs[0].ID, err)
+		return dbread.Project{}, err
+	}
+	projects, err := read.GetProjectsByOrgID(ctx, orgID)
+	if err != nil {
+		return dbread.Project{}, fmt.Errorf("failed to query projects for org %s: %w", orgID, err)
 	}
 	if len(projects) == 0 {
-		return dbread.Project{}, fmt.Errorf("no projects found for org %s", orgs[0].ID)
+		return dbread.Project{}, fmt.Errorf("no projects found for org %s", orgID)
 	}
 	return projects[0], nil
+}
+
+// demoOrgID picks the first of the demo user's orgs, oldest first, that also has
+// the demo viewer. A database seeded before the viewer existed has none, and
+// nothing else marks the demo org, so it is refused rather than guessed at.
+func demoOrgID(ctx context.Context, read *dbread.Queries, orgs []dbread.Org) (string, error) {
+	const remedy = "a default `pug seed` recreates the demo data"
+	viewer, err := read.GetCustomerByEmail(ctx, viewerEmail)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("there is no %s account to find the demo org by; %s", viewerEmail, remedy)
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to look up the demo viewer: %w", err)
+	}
+	for _, org := range orgs {
+		_, err := read.GetOrgMemberRole(ctx, dbread.GetOrgMemberRoleParams{OrgID: org.ID, CustomerID: viewer.ID})
+		if err == nil {
+			return org.ID, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("failed to check org %s for the demo viewer: %w", org.ID, err)
+		}
+	}
+	return "", fmt.Errorf("no org has both %s and %s; %s", userEmail, viewerEmail, remedy)
 }
 
 // seedCustomerOrgProject creates the demo customer/org/project and returns the
@@ -152,11 +329,6 @@ func (s *Seeder) resolveProject(ctx context.Context, read *dbread.Queries, custo
 // user would) so local dev has one to call the SDK/MCP endpoints with, and the
 // raw value is returned because nothing but its digest is stored.
 func (s *Seeder) seedCustomerOrgProject(ctx context.Context) (dbread.Project, string, error) {
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return dbread.Project{}, "", fmt.Errorf("failed to hash password: %w", err)
-	}
-
 	tx, err := s.deps.pg.Begin(ctx)
 	if err != nil {
 		return dbread.Project{}, "", fmt.Errorf("failed to begin transaction: %w", err)
@@ -165,11 +337,13 @@ func (s *Seeder) seedCustomerOrgProject(ctx context.Context) (dbread.Project, st
 
 	w := dbwrite.New(tx)
 
+	// Stored as the org's admin so the org always has one on paper; the server
+	// treats it as a viewer anyway.
 	customer, err := w.CreateCustomer(ctx, dbwrite.CreateCustomerParams{
 		ID:           xid.New().String(),
-		Email:        testEmail,
-		DisplayName:  testName,
-		PasswordHash: string(passwordHash),
+		Email:        userEmail,
+		DisplayName:  userName,
+		PasswordHash: "",
 		PictureUri:   "",
 	})
 	if err != nil {
@@ -258,7 +432,7 @@ var streetNames = []string{
 	"Elm St", "Pine Rd", "Washington Ave", "Lake Dr", "Hill Ct",
 }
 
-// Weighted breeds — this is a pug company, the demo skews accordingly.
+// Weighted breeds: this is a pug company, the demo skews accordingly.
 var breeds = []struct {
 	name   string
 	size   string
@@ -315,7 +489,7 @@ const profileSeed = 0xC0FFEE
 // (same home city/country the event generator gives this distinct id, and
 // pug_club membership matching the journeys the user runs) plus a deterministic
 // identified/anonymous split. Returns the properties and the external id, which
-// is "" for anonymous-only users — so the caller derives identified as
+// is "" for anonymous-only users, so the caller derives identified as
 // externalID != "". Keyed only on i (the DemoUser is derived internally from the
 // same index) so a mismatched (i, du) pair can't produce a Frankenstein profile.
 // Deterministic in i so every caller agrees.
@@ -337,7 +511,7 @@ func DemoProfileProperties(i int) (props map[string]any, externalID string) {
 		props["pug_club"] = true
 	}
 
-	// ~60% identified (signed up / signed in → external_id), the rest
+	// ~60% identified (signed up or signed in, which sets external_id), the rest
 	// anonymous-only. Drawn before the optional rich fields so the split is
 	// stable regardless of how many rich-field draws follow.
 	if r.Float32() < 0.60 {
@@ -390,7 +564,7 @@ func (s *Seeder) seedProfiles(ctx context.Context, projectID string, indices []i
 		if err := w.SeedDemoProfile(ctx, dbwrite.SeedDemoProfileParams{
 			ID:         id,
 			ProjectID:  projectID,
-			ExternalID: dbtypes.NewOptionalText(externalID), // "" → NULL (anonymous)
+			ExternalID: dbtypes.NewOptionalText(externalID), // "" becomes NULL (anonymous)
 			Properties: props,
 			CreateTime: dbtypes.NewTimestamptz(du.Join),
 			UpdateTime: dbtypes.NewTimestamptz(du.Join),
@@ -412,7 +586,7 @@ func (s *Seeder) seedProfiles(ctx context.Context, projectID string, indices []i
 
 // seedMerges simulates the identify-time merge flow for ~30% of identified profiles.
 // For each chosen profile, an anonymous profile is created with some properties,
-// given a device, merged into the identified profile, devices reassigned, then deleted —
+// given a device, merged into the identified profile, devices reassigned, then deleted,
 // mirroring the core merge steps from the identify worker (merge properties,
 // reassign devices, delete source).
 func (s *Seeder) seedMerges(ctx context.Context, projectID string, identifiedIDs []string) error {
@@ -467,7 +641,7 @@ func (s *Seeder) seedMerges(ctx context.Context, projectID string, identifiedIDs
 			ProjectID: projectID,
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return fmt.Errorf("merge %s → %s: %w", anonID, targetID, err)
+			return fmt.Errorf("merge %s into %s: %w", anonID, targetID, err)
 		}
 
 		if err := qtx.ReassignProfileDevices(ctx, dbwrite.ReassignProfileDevicesParams{
@@ -476,7 +650,7 @@ func (s *Seeder) seedMerges(ctx context.Context, projectID string, identifiedIDs
 			ProjectID: projectID,
 		}); err != nil {
 			_ = tx.Rollback(ctx)
-			return fmt.Errorf("reassign devices %s → %s: %w", anonID, targetID, err)
+			return fmt.Errorf("reassign devices %s to %s: %w", anonID, targetID, err)
 		}
 
 		if _, err := qtx.SoftDeleteProfileByIDAndProjectID(ctx, dbwrite.SoftDeleteProfileByIDAndProjectIDParams{
@@ -581,9 +755,34 @@ func (s *Seeder) seedDevices(ctx context.Context, projectID string, indices []in
 // SeedAccount ensures the demo customer/org/project exists and returns it, using
 // a caller-owned pool, WITHOUT seeding any profiles. Both the demo worker and
 // the `pug seed` CLI derive the demo project from this and then seed profiles
-// only for the users that produced events (SeedProfilesForUsers).
+// only for the users that produced events (SeedProfilesForUsers). With
+// PUG_DEMO_ADMIN_PASSWORD set, it also creates the demo org's admin, or restores
+// that account's role while its password matches.
 func SeedAccount(ctx context.Context, pg *pgxpool.Pool) (dbread.Project, error) {
-	return NewSeeder(&deps{pg: pg}).seedAccount(ctx)
+	password, err := AdminPasswordFromEnv()
+	if err != nil {
+		return dbread.Project{}, err
+	}
+	return NewSeeder(&deps{pg: pg, adminPassword: password}).seedAccount(ctx)
+}
+
+// AdminPasswordFromEnv reads PUG_DEMO_ADMIN_PASSWORD and checks it: at least 16
+// characters, since the account's email is public, and at most bcrypt's 72
+// bytes. Surrounding whitespace is refused too, since a secret file's trailing
+// newline would otherwise become part of a password nobody knows. `pug seed`
+// calls it before resetting anything. The error never includes the password.
+func AdminPasswordFromEnv() (string, error) {
+	p := os.Getenv("PUG_DEMO_ADMIN_PASSWORD")
+	if p == "" {
+		return "", nil
+	}
+	if strings.TrimSpace(p) != p {
+		return "", errors.New("PUG_DEMO_ADMIN_PASSWORD has leading or trailing whitespace, such as a newline from a secret file")
+	}
+	if n := utf8.RuneCountInString(p); n < 16 || len(p) > 72 {
+		return "", fmt.Errorf("PUG_DEMO_ADMIN_PASSWORD must be at least 16 characters and at most 72 bytes; it has %d characters in %d bytes", n, len(p))
+	}
+	return p, nil
 }
 
 // SeedProfilesForUsers seeds Postgres profiles, devices and merges for exactly
@@ -616,8 +815,8 @@ func ResetDemoProfiles(ctx context.Context, pg *pgxpool.Pool, projectID string) 
 // CountDemoProfiles returns how many live (non-deleted) profiles exist for the
 // demo project. The demo worker compares this against the ClickHouse profile
 // count to detect a CopyProfilesToClickHouse that didn't finish (ClickHouse
-// behind Postgres) and re-drive it. It counts every demo profile — the
-// user-%05d rows and the xid-keyed merge artifacts — and excludes soft-deleted
+// behind Postgres) and re-drive it. It counts every demo profile (the
+// user-%05d rows and the xid-keyed merge artifacts) and excludes soft-deleted
 // rows, matching exactly what the copy moves (GetAllProfilesByProjectID filters
 // `deletion_time is null`), so a fully-copied project reads equal on both sides.
 func CountDemoProfiles(ctx context.Context, pg *pgxpool.Pool, projectID string) (int64, error) {

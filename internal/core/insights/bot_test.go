@@ -165,7 +165,7 @@ func TestBotExclusion_EveryInsightType(t *testing.T) {
 			})
 			q, err := BuildUserFlowQuery(req, "p1")
 			must(t, err)
-			// Groups by session, so the predicate is session-level — a row-level
+			// Groups by session, so the predicate is session-level; a row-level
 			// one would leave a straddling session as a truncated path.
 			return []botScan{{"raw", q.SQL(), botSessionNeedle, 1}}
 		},
@@ -210,7 +210,7 @@ func TestBotExclusion_EveryInsightType(t *testing.T) {
 		it := insightsv1.InsightType(num)
 		build, ok := cases[it]
 		if !ok {
-			t.Errorf("%s has no bot decision: every insight must exclude bots by default — add it to this table and thread botExclusionCond (or botSessionHaving) through its builders", name)
+			t.Errorf("%s has no bot decision: every insight must exclude bots by default; add it to this table and thread botExclusionCond (or botSessionHaving) through its builders", name)
 			continue
 		}
 		if build == nil {
@@ -231,9 +231,9 @@ func TestBotExclusion_EveryInsightType(t *testing.T) {
 	}
 }
 
-// Every session metric excludes at the session level on both paths; a
-// row-level `bot = 0` would keep the untagged half of a straddling session,
-// so its absence is asserted too.
+// Every session metric excludes at the session level; a row-level `bot = 0`
+// would keep the untagged half of a straddling session, so its absence is
+// asserted too.
 func TestBotExclusion_EverySessionMetric(t *testing.T) {
 	buildable := map[insightsv1.SessionMetric]bool{
 		insightsv1.SessionMetric_SESSION_METRIC_UNSPECIFIED:            false,
@@ -249,7 +249,7 @@ func TestBotExclusion_EverySessionMetric(t *testing.T) {
 		metric := insightsv1.SessionMetric(num)
 		ok, decided := buildable[metric]
 		if !decided {
-			t.Errorf("%s has no session-bot decision: add it to buildable — a session metric must exclude bot sessions whole", name)
+			t.Errorf("%s has no session-bot decision: add it to buildable; a session metric must exclude bot sessions whole", name)
 			continue
 		}
 		if !ok {
@@ -260,27 +260,17 @@ func TestBotExclusion_EverySessionMetric(t *testing.T) {
 				req := sessionReq(metric, "page_view", "$pathname")
 				req.Spec.IncludeBots = proto.Bool(include)
 
-				rawTrends, err := BuildSessionTrendsQuery(req, "p1")
+				trends, err := BuildSessionTrendsQuery(req, "p1")
 				if err != nil {
 					t.Fatal(err)
 				}
-				rawSeg, err := BuildSessionSegmentationQuery(req, "p1")
-				if err != nil {
-					t.Fatal(err)
-				}
-				rollupTrends, err := buildSessionTrendsFromRollup(req, "p1")
-				if err != nil {
-					t.Fatal(err)
-				}
-				rollupSeg, err := buildSessionSegmentationFromRollup(req, "p1")
+				seg, err := BuildSessionSegmentationQuery(req, "p1")
 				if err != nil {
 					t.Fatal(err)
 				}
 				for _, s := range []struct{ name, sql string }{
-					{"raw trends", rawTrends.SQL()},
-					{"raw segmentation", rawSeg.SQL()},
-					{"rollup trends", rollupTrends.SQL()},
-					{"rollup segmentation", rollupSeg.SQL()},
+					{"trends", trends.SQL()},
+					{"segmentation", seg.SQL()},
 				} {
 					switch {
 					case include && hasBotPredicate(s.sql):
@@ -296,9 +286,9 @@ func TestBotExclusion_EverySessionMetric(t *testing.T) {
 	}
 }
 
-// Both toggle states must stay on the fast path: bot is a key column on both
-// rollups, so exclusion is a predicate and inclusion is a merge across the
-// key's two values — never a reason to fall back to raw events.
+// Both toggle states must stay on the fast path: bot is a key column on the
+// event rollup, so exclusion is a predicate and inclusion is a merge across the
+// key's two values, never a reason to fall back to raw events.
 func TestBotExclusion_KeepsFastPath(t *testing.T) {
 	uu := insightsv1.AggregationType_AGGREGATION_TYPE_UNIQUE_USERS
 	now := time.Now()
@@ -320,16 +310,10 @@ func TestBotExclusion_KeepsFastPath(t *testing.T) {
 		if _, usedRollup, err := topKQueryForExecution(rollupDayReq(topKSpec), "p1", now); err != nil || !usedRollup {
 			t.Errorf("include=%v top k: usedRollup=%v err=%v", include, usedRollup, err)
 		}
-
-		sessionReq := sessionReq(insightsv1.SessionMetric_SESSION_METRIC_SESSIONS, "page_view", "")
-		sessionReq.Spec.IncludeBots = proto.Bool(include)
-		if _, usedRollup, err := sessionTrendsQueryForExecution(sessionReq, "p1", now); err != nil || !usedRollup {
-			t.Errorf("include=%v session trends: usedRollup=%v err=%v", include, usedRollup, err)
-		}
 	}
 }
 
-// Multi-event trends put the predicate in the shared WHERE once — unlike
+// Multi-event trends put the predicate in the shared WHERE once, unlike
 // cookieless, which is per branch because a TOTAL sibling keeps that traffic.
 func TestBotExclusion_MultiEventTrendsSharedWhere(t *testing.T) {
 	spec := rollupMultiEventTrendsSpec("page_view", "signup")

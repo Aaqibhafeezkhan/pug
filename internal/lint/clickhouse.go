@@ -21,7 +21,6 @@ var tenantTables = map[string]bool{
 	"event_names":                   true,
 	"distinct_id_activity_states":   true,
 	"dashboard_event_rollup_daily":  true,
-	"dashboard_session_rollup":      true,
 	"property_keys":                 true,
 	"property_keys_event_buckets":   true,
 	"property_keys_profile_current": true,
@@ -184,7 +183,7 @@ func (q *queryScopes) key(outer *ast.CallExpr, root ast.Expr, bound map[*ast.Cal
 // exprKey resolves a sub-query argument back to the key its own chain was filed
 // under, so `With("agg", aggCTE)` can ask whether aggCTE is scoped. A slice
 // element keys to the slice: the index is a loop variable, so the elements
-// cannot be told apart statically — and a loop that builds them builds them
+// cannot be told apart statically, and a loop that builds them builds them
 // alike.
 func (q *queryScopes) exprKey(e ast.Expr) any {
 	switch e := e.(type) {

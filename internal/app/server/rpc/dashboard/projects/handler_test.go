@@ -1,6 +1,7 @@
 package projects
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	validatepb "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	"connectrpc.com/authn"
 	"connectrpc.com/connect"
 	"github.com/golang-jwt/jwt/v5"
@@ -332,9 +334,9 @@ func TestHandler_UpdateMeta_ClearsTimezoneToUTC(t *testing.T) {
 // ----- Create: admin required → CodePermissionDenied + ReasonOrgAdminRequired ----
 
 // TestHandler_Create_NonAdminReturnsPermissionDenied verifies the admin gate on
-// project Create that lives in the CreateProjectAsAdmin SQL CTE — a race-safe,
+// project Create that lives in the CreateProjectAsAdmin SQL CTE: a race-safe,
 // service-level check distinct from (and defense-in-depth behind) the
-// AuthzInterceptor. Every non-admin role — member AND viewer — is rejected at the
+// AuthzInterceptor. Every non-admin role (member AND viewer) is rejected at the
 // CTE with ORG_ADMIN_REQUIRED.
 func TestHandler_Create_NonAdminReturnsPermissionDenied(t *testing.T) {
 	if testing.Short() {
@@ -528,7 +530,7 @@ func TestHandler_UpdateMeta_TimezoneOnlyPreservesName(t *testing.T) {
 //
 // Distinct code path from the "UTC" string (TestHandler_UpdateMeta_ClearsTimezoneToUTC):
 // a present "" is a non-nil pointer to empty, so it must enter the presence branch
-// (req.Msg.ReportingTimezone != nil), pass tzx.Validate(""), and be WRITTEN as "" —
+// (req.Msg.ReportingTimezone != nil), pass tzx.Validate(""), and be WRITTEN as "",
 // not treated as omitted (which would preserve the old zone). Re-reads via
 // GetProjectByID to assert persistence, not just the echoed RETURNING row.
 func TestHandler_UpdateMeta_EmptyStringResetsTimezoneToUTC(t *testing.T) {
@@ -600,7 +602,7 @@ func TestHandler_UpdateMeta_EmptyStringResetsTimezoneToUTC(t *testing.T) {
 // TestHandler_ProjectLifecycle_AdminAllowed exercises the admin happy path for the
 // project-lifecycle handlers (Delete / UpdateMeta / UpdateFCMServiceJSON). The
 // admin-only ROLE gate now lives in the AuthzInterceptor (see
-// rpc.TestRoleGatedAdminOnlyRPCs), so this no longer asserts denials — it only
+// rpc.TestRoleGatedAdminOnlyRPCs), so this no longer asserts denials; it only
 // confirms the handlers themselves run for an authorized caller.
 func TestHandler_ProjectLifecycle_AdminAllowed(t *testing.T) {
 	if testing.Short() {
@@ -629,6 +631,87 @@ func TestHandler_ProjectLifecycle_AdminAllowed(t *testing.T) {
 	if _, err := srv.Delete(ctxWithCustomerProject(ctx, customer, p), connect.NewRequest(&projectsv1.DeleteRequest{})); err != nil {
 		t.Fatalf("admin Delete: %v", err)
 	}
+}
+
+// TestHandler_FCMServiceJSON_NeverReturned pins that the stored FCM
+// service-account key is write-only. Get (no role gate) and BatchGet (a
+// viewer-floor read) serve every org role, and UpdateMeta shares their mapper,
+// so no field of their responses may carry the key. GetProjectByID, which push
+// delivery reads, still must.
+func TestHandler_FCMServiceJSON_NeverReturned(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	srv, customer, orgID := newIntegrationServer(t)
+	ctx := context.Background()
+
+	// The sentinel sits inside the private key, so finding it in a response's
+	// wire bytes means some field carries the key, whatever that field is.
+	const sentinel = "fcm-private-key-sentinel"
+	const fcmJSON = `{"type":"service_account","private_key":"-----BEGIN PRIVATE KEY-----\n` + sentinel + `\n-----END PRIVATE KEY-----\n"}`
+
+	assertNoKey := func(rpcName string, m proto.Message) {
+		t.Helper()
+		wire, err := proto.Marshal(m)
+		if err != nil {
+			t.Fatalf("%s: marshal response: %v", rpcName, err)
+		}
+		if bytes.Contains(wire, []byte(sentinel)) {
+			t.Errorf("%s response carries the FCM private key", rpcName)
+		}
+	}
+
+	created, err := srv.Create(ctxWithCustomer(ctx, customer), connect.NewRequest(&projectsv1.CreateRequest{
+		OrgId: proto.String(orgID), DisplayName: proto.String("fcm project"),
+	}))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	projectID := created.Msg.GetProject().GetId()
+	projectCtx := ctxWithCustomerProject(ctx, customer, dbread.Project{ID: projectID, OrgID: orgID})
+
+	set, err := srv.UpdateFCMServiceJSON(projectCtx, connect.NewRequest(&projectsv1.UpdateFCMServiceJSONRequest{FcmServiceJson: proto.String(fcmJSON)}))
+	if err != nil {
+		t.Fatalf("UpdateFCMServiceJSON: %v", err)
+	}
+	assertNoKey("UpdateFCMServiceJSON", set.Msg)
+
+	stored, err := srv.service.GetProjectByID(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetProjectByID: %v", err)
+	}
+	if stored.FcmServiceJson.String != fcmJSON {
+		t.Fatalf("stored FcmServiceJson = %q, want %q", stored.FcmServiceJson.String, fcmJSON)
+	}
+
+	// Get serves the principal's project row as auth loaded it, key included.
+	// Each read must return the project, or an empty response would pass.
+	got, err := srv.Get(ctxWithCustomerProject(ctx, customer, stored), connect.NewRequest(&projectsv1.GetRequest{}))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if id := got.Msg.GetProject().GetId(); id != projectID {
+		t.Fatalf("Get returned project %q, want %q", id, projectID)
+	}
+	assertNoKey("Get", got.Msg)
+
+	batch, err := srv.BatchGet(ctxWithCustomer(ctx, customer), connect.NewRequest(&projectsv1.BatchGetRequest{OrgId: proto.String(orgID)}))
+	if err != nil {
+		t.Fatalf("BatchGet: %v", err)
+	}
+	if len(batch.Msg.GetProjects()) == 0 {
+		t.Fatal("BatchGet returned no projects")
+	}
+	assertNoKey("BatchGet", batch.Msg)
+
+	updated, err := srv.UpdateMeta(projectCtx, connect.NewRequest(&projectsv1.UpdateMetaRequest{DisplayName: proto.String("fcm project renamed")}))
+	if err != nil {
+		t.Fatalf("UpdateMeta: %v", err)
+	}
+	if id := updated.Msg.GetProject().GetId(); id != projectID {
+		t.Fatalf("UpdateMeta returned project %q, want %q", id, projectID)
+	}
+	assertNoKey("UpdateMeta", updated.Msg)
 }
 
 // ----- API keys: list / create / delete -----
@@ -666,7 +749,7 @@ func TestHandler_ApiKeys_Lifecycle(t *testing.T) {
 		if keys[0].GetKind() != projectsv1.ApiKeyKind_API_KEY_KIND_PUBLIC {
 			t.Errorf("starter key kind = %v, want PUBLIC", keys[0].GetKind())
 		}
-		// ListApiKeys is the only way to read a project's keys — Project carries none.
+		// ListApiKeys is the only way to read a project's keys: Project carries none.
 		if !strings.HasPrefix(keys[0].GetKey(), "pub_") {
 			t.Errorf("starter key = %q, want a pub_ key", keys[0].GetKey())
 		}
@@ -686,7 +769,7 @@ func TestHandler_ApiKeys_Lifecycle(t *testing.T) {
 		if !strings.HasPrefix(res.Msg.GetKey(), "prv_") {
 			t.Errorf("returned key = %q, want a prv_ key", res.Msg.GetKey())
 		}
-		// The response message itself must not carry the secret — only the
+		// The response message itself must not carry the secret; only the
 		// top-level key field does, and only here.
 		if got := res.Msg.GetApiKey().GetKey(); got != "" {
 			t.Errorf("ApiKey.key = %q, want empty for a private key", got)
@@ -796,12 +879,12 @@ func TestHandler_DeleteApiKey_IsProjectScoped(t *testing.T) {
 		t.Fatalf("ListApiKeys after: %v", err)
 	}
 	if len(after.Msg.GetApiKeys()) != 1 {
-		t.Errorf("victim now has %d keys — its key was deleted from another project's context", len(after.Msg.GetApiKeys()))
+		t.Errorf("victim now has %d keys: its key was deleted from another project's context", len(after.Msg.GetApiKeys()))
 	}
 }
 
 // Every key RPC scopes to the x-project-id project. A principal without one is
-// rejected before the service is reached — hence the nil service here, which
+// rejected before the service is reached, hence the nil service here, which
 // would panic if a handler ever stopped resolving the project first.
 func TestHandler_ApiKeys_RequireProjectScope(t *testing.T) {
 	srv := NewServer(nil)
@@ -817,4 +900,88 @@ func TestHandler_ApiKeys_RequireProjectScope(t *testing.T) {
 
 	_, err = srv.DeleteApiKey(ctx, connect.NewRequest(&projectsv1.DeleteApiKeyRequest{Id: proto.String("k1")}))
 	assertCode(t, err, connect.CodeUnauthenticated)
+}
+
+// ----- UpdateMeta: default_theme is stored and served, kept when omitted, cleared by "" ----
+
+func TestHandler_UpdateMeta_DefaultTheme(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	srv, customer, orgID := newIntegrationServer(t)
+	ctx := context.Background()
+
+	created, err := srv.Create(ctxWithCustomer(ctx, customer), connect.NewRequest(&projectsv1.CreateRequest{
+		OrgId:       proto.String(orgID),
+		DisplayName: proto.String("themed"),
+	}))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	projectID := created.Msg.GetProject().GetId()
+	asAdmin := ctxWithCustomerProject(ctx, customer, dbread.Project{ID: projectID, OrgID: orgID})
+
+	// BatchGet reads the row, where Get only echoes the principal's project.
+	served := func() string {
+		t.Helper()
+		resp, err := srv.BatchGet(ctx, connect.NewRequest(&projectsv1.BatchGetRequest{OrgId: proto.String(orgID)}))
+		if err != nil {
+			t.Fatalf("BatchGet: %v", err)
+		}
+		for _, p := range resp.Msg.GetProjects() {
+			if p.GetId() == projectID {
+				return p.GetDefaultTheme()
+			}
+		}
+		t.Fatalf("project %s missing from BatchGet", projectID)
+		return ""
+	}
+
+	if got := served(); got != "" {
+		t.Fatalf("a new project's default_theme = %q, want \"\"", got)
+	}
+
+	const linen = "https://themes.pug.sh/linen/theme.json#dark"
+	updated, err := srv.UpdateMeta(asAdmin, connect.NewRequest(&projectsv1.UpdateMetaRequest{
+		DefaultTheme: proto.String(linen),
+	}))
+	if err != nil {
+		t.Fatalf("UpdateMeta: %v", err)
+	}
+	if got := updated.Msg.GetProject().GetDefaultTheme(); got != linen {
+		t.Errorf("UpdateMeta response default_theme = %q, want %q", got, linen)
+	}
+	if got := served(); got != linen {
+		t.Errorf("after setting it, default_theme = %q, want %q", got, linen)
+	}
+
+	// Omitted: a name-only update must keep the theme.
+	if _, err := srv.UpdateMeta(asAdmin, connect.NewRequest(&projectsv1.UpdateMetaRequest{
+		DisplayName: proto.String("renamed"),
+	})); err != nil {
+		t.Fatalf("UpdateMeta (name only): %v", err)
+	}
+	if got := served(); got != linen {
+		t.Errorf("after a name-only update, default_theme = %q, want %q kept", got, linen)
+	}
+
+	// Present "": clears.
+	if _, err := srv.UpdateMeta(asAdmin, connect.NewRequest(&projectsv1.UpdateMetaRequest{
+		DefaultTheme: proto.String(""),
+	})); err != nil {
+		t.Fatalf("UpdateMeta (clear): %v", err)
+	}
+	if got := served(); got != "" {
+		t.Errorf("after clearing, default_theme = %q, want \"\"", got)
+	}
+
+	// Raising max_len without widening the column must fail here, not in production.
+	field := (&projectsv1.UpdateMetaRequest{}).ProtoReflect().Descriptor().Fields().ByName("default_theme")
+	maxLen := int(proto.GetExtension(field.Options(), validatepb.E_Field).(*validatepb.FieldRules).GetString().GetMaxLen())
+	longest := ("https://themes.pug.sh/" + strings.Repeat("a", maxLen))[:maxLen]
+	if _, err := srv.UpdateMeta(asAdmin, connect.NewRequest(&projectsv1.UpdateMetaRequest{
+		DefaultTheme: proto.String(longest),
+	})); err != nil {
+		t.Fatalf("UpdateMeta with a %d-char default_theme: %v", maxLen, err)
+	}
 }

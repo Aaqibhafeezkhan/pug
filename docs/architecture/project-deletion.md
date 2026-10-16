@@ -66,7 +66,6 @@ Every table leads its sort key with `project_id`.
 | `profile_aliases` | identity links | delete |
 | `distinct_id_activity_states` | per-person activity, anonymous people included | delete |
 | `dashboard_event_rollup_daily` | daily rollup | delete |
-| `dashboard_session_rollup` | session rollup | delete |
 | `event_names` | event names seen | delete |
 | `property_keys_event_buckets` | property keys seen | delete |
 | `property_keys_profile_current` | profile property keys | none. It rebuilds itself from `profiles` every 5 minutes. The job only checks it is empty. |

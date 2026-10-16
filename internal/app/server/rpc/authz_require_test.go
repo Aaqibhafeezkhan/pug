@@ -42,7 +42,7 @@ func TestRequirePermission(t *testing.T) {
 	}
 
 	t.Run("no customer principal is unauthenticated", func(t *testing.T) {
-		// No authn info on the context → MustGetPrincipalWithCustomer fails before
+		// No authn info on the context, so MustGetPrincipalWithCustomer fails before
 		// any role lookup.
 		_, err := requirePermission(context.Background(), authorizer, fakeRoleLookup{role: coreorgs.RoleAdmin},
 			"org-1", authz.ResourceOrg, authz.ActionUpdate)
@@ -97,21 +97,24 @@ func TestRequirePermission(t *testing.T) {
 		}
 	})
 
-	t.Run("demo account is a viewer whatever role is stored", func(t *testing.T) {
-		ctx := authn.SetInfo(context.Background(), &Principal{
-			AuthType: AuthTypeJWT,
-			Customer: &dbread.Customer{ID: "cust-demo", Email: coreauth.DemoViewerEmail},
+	for _, email := range []string{coreauth.DemoViewerEmail, coreauth.DemoUserEmail} {
+		t.Run(email+" is a viewer whatever role is stored", func(t *testing.T) {
+			ctx := authn.SetInfo(context.Background(), &Principal{
+				AuthType: AuthTypeJWT,
+				Customer: &dbread.Customer{ID: "cust-demo", Email: email},
+			})
+			admin := fakeRoleLookup{role: coreorgs.RoleAdmin}
+			// A write a member may make, so treating the account as a member fails too.
+			_, err := requirePermission(ctx, authorizer, admin, "org-1", authz.ResourceDashboard, authz.ActionCreate)
+			var ae *apperr.Error
+			if !errors.As(err, &ae) || ae.Reason() != apperr.ReasonOrgRoleForbidden {
+				t.Fatalf("write: want ORG_ROLE_FORBIDDEN, got %v", err)
+			}
+			if _, err := requirePermission(ctx, authorizer, admin, "org-1", authz.ResourceOrg, authz.ActionRead); err != nil {
+				t.Fatalf("read: unexpected error: %v", err)
+			}
 		})
-		admin := fakeRoleLookup{role: coreorgs.RoleAdmin}
-		_, err := requirePermission(ctx, authorizer, admin, "org-1", authz.ResourceOrg, authz.ActionUpdate)
-		var ae *apperr.Error
-		if !errors.As(err, &ae) || ae.Reason() != apperr.ReasonOrgRoleForbidden {
-			t.Fatalf("write: want ORG_ROLE_FORBIDDEN, got %v", err)
-		}
-		if _, err := requirePermission(ctx, authorizer, admin, "org-1", authz.ResourceOrg, authz.ActionRead); err != nil {
-			t.Fatalf("read: unexpected error: %v", err)
-		}
-	})
+	}
 
 	t.Run("admin allowed an admin action returns the principal", func(t *testing.T) {
 		p, err := requirePermission(customerCtx(), authorizer, fakeRoleLookup{role: coreorgs.RoleAdmin},

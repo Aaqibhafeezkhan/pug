@@ -20,10 +20,11 @@ import (
 	"github.com/pug-sh/pug/internal/tzx"
 )
 
-// Authorization (project-role gating) is enforced centrally by
-// rpc.AuthzInterceptor from the permission registry, before any handler runs —
-// project lifecycle writes are admin-only, BatchGet is member+, all resolved
-// from the registry. Create additionally has a race-safe admin check in its CTE.
+// Authorization (org-role gating) is enforced centrally by
+// rpc.AuthzInterceptor from the permission registry, before any handler runs:
+// project lifecycle writes are admin-only, and Get and BatchGet serve every
+// role, viewers included. Create additionally has a race-safe admin check in
+// its CTE.
 type server struct {
 	service *projects.Service
 }
@@ -133,7 +134,7 @@ func (s *server) ListApiKeys(
 }
 
 // CreateApiKey mints a key for the project specified by the x-project-id header.
-// The response carries the key in full — for a private key that is the only time
+// The response carries the key in full; for a private key that is the only time
 // it exists outside the caller, since only its digest is stored.
 func (s *server) CreateApiKey(
 	ctx context.Context,
@@ -223,9 +224,10 @@ func (s *server) Delete(
 	return connect.NewResponse(&projectsv1.DeleteResponse{}), nil
 }
 
-// UpdateMeta partially updates the editable metadata (display name + reporting
-// timezone) of the project specified by the x-project-id header. An omitted field
-// is left unchanged; a present reporting_timezone of "" resets it to UTC.
+// UpdateMeta partially updates the editable metadata (display name, reporting
+// timezone and default theme) of the project specified by the x-project-id header.
+// An omitted field is left unchanged; a present reporting_timezone of "" resets it
+// to UTC, and a present default_theme of "" clears it.
 func (s *server) UpdateMeta(
 	ctx context.Context,
 	req *connect.Request[projectsv1.UpdateMetaRequest],
@@ -240,7 +242,7 @@ func (s *server) UpdateMeta(
 	}
 
 	// Partial update: each field is presence-tracked (edition 2023). A nil pointer
-	// means "leave unchanged" — NewNullableText emits SQL NULL and the query's
+	// means "leave unchanged": NewNullableText emits SQL NULL and the query's
 	// coalesce(...) preserves the stored value. reporting_timezone is validated and
 	// normalized only when the client actually sent it; a present "" resets to UTC.
 	var tz *string
@@ -258,6 +260,7 @@ func (s *server) UpdateMeta(
 		ID:                principal.Project.ID,
 		DisplayName:       postgres.NewNullableText(req.Msg.DisplayName),
 		ReportingTimezone: postgres.NewNullableText(tz),
+		DefaultTheme:      postgres.NewNullableText(req.Msg.DefaultTheme),
 	}
 	projectData, err := s.service.UpdateProjectMeta(ctx, wParams)
 	if err != nil {

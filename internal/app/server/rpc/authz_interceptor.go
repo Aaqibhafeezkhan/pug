@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 
 	"connectrpc.com/connect"
 
@@ -18,17 +17,17 @@ import (
 // AuthzInterceptor is the single authorization gate. For every role-gated
 // procedure in permissionRegistry it resolves the caller's org role and enforces
 // the recorded (resource, action) against the shared authz policy. Any other
-// registered procedure passes through untouched, except a self-write by the demo
-// account, which anyone can sign in as. A procedure with NO registry entry fails
-// CLOSED (CodeInternal): the reflection contract test keeps the registry
-// complete, so an unregistered procedure is a wiring bug — it must never reach a
-// handler authenticated-but-not-authorized just because the service-level
-// startup check sees its service mounted.
+// registered procedure passes through untouched, except a self-write by a demo
+// account (coreauth.IsDemoAccount), which is refused. A procedure with NO
+// registry entry fails CLOSED (CodeInternal): the reflection contract test
+// keeps the registry complete, so an unregistered procedure is a wiring bug:
+// it must never reach a handler authenticated-but-not-authorized just because
+// the service-level startup check sees its service mounted.
 //
 // There is no per-handler authorization: handlers assume the request reaching
 // them is already authorized. Because TestPermissionRegistryCoversAllProcedures
 // pins the registry to exactly the served procedures, a new role-gated RPC is
-// enforced the moment its registry entry is added — it cannot ship unguarded —
+// enforced the moment its registry entry is added (it cannot ship unguarded),
 // and the interceptor tests catch a drifted (resource, action, orgSource).
 //
 // It runs as a Connect interceptor, i.e. AFTER the authn middleware has populated
@@ -41,7 +40,7 @@ func AuthzInterceptor(authorizer *authz.Authorizer, lookup memberRoleLookup) con
 				// Fail closed. The reflection contract (TestPermissionRegistry-
 				// CoversAllProcedures) pins the registry to exactly the served
 				// procedures, so a miss means a procedure shipped without an authz
-				// decision — a wiring bug, never a normal call. Deny it (and surface
+				// decision: a wiring bug, never a normal call. Deny it (and surface
 				// it loudly) rather than serve it with authentication but no
 				// authorization; this is the runtime backstop to the service-level
 				// startup check, which a new procedure on a mounted service slips past.
@@ -52,7 +51,7 @@ func AuthzInterceptor(authorizer *authz.Authorizer, lookup memberRoleLookup) con
 				return nil, err
 			}
 			if !spec.IsRoleGated() {
-				if spec.IsSelfWrite() && isDemoViewer(ctx) {
+				if spec.IsSelfWrite() && isDemoAccount(ctx) {
 					return nil, apperr.PermissionDenied(apperr.ReasonOrgRoleForbidden, "the demo account is read-only")
 				}
 				return next(ctx, req)
@@ -65,19 +64,19 @@ func AuthzInterceptor(authorizer *authz.Authorizer, lookup memberRoleLookup) con
 	}
 }
 
-// isDemoViewer keys on the account rather than the session, so every session for
-// it is caught, however it was minted.
-func isDemoViewer(ctx context.Context) bool {
+// isDemoAccount keys on the account rather than the session, so every session for
+// a demo account is caught, however it was minted.
+func isDemoAccount(ctx context.Context) bool {
 	p, err := MustGetPrincipalWithCustomer(ctx)
-	return err == nil && strings.EqualFold(p.Customer.Email, coreauth.DemoViewerEmail)
+	return err == nil && coreauth.IsDemoAccount(p.Customer.Email)
 }
 
 // authorizeRoleGated enforces one domainRoleGated entry. On the API-key path (no
-// customer principal) it is a deliberate no-op for project-scoped RPCs — API-key
-// access stays coarse project scope, exactly as before Casbin — but an org-control-
+// customer principal) it is a deliberate no-op for project-scoped RPCs (API-key
+// access stays coarse project scope, exactly as before Casbin), but an org-control-
 // plane RPC (OrgFromMessage) reached without a customer fails CLOSED (those services
 // are JWT-only, so this is a wiring backstop, not a live path). On the JWT path it
-// resolves the org per the entry's orgSource and checks (resource, action) — a
+// resolves the org per the entry's orgSource and checks (resource, action): a
 // non-member is denied ORG_NOT_A_MEMBER, an under-privileged member
 // ORG_ROLE_FORBIDDEN (both PermissionDenied).
 func authorizeRoleGated(
@@ -93,7 +92,7 @@ func authorizeRoleGated(
 	}
 	// API-key (SDK / private-key) path: no customer, no role. The coarse "skip the
 	// role gate" bypass is legitimate ONLY for a project-scoped RPC (OrgFromProject)
-	// that resolved a project from the key — that IS the pre-Casbin coarse project
+	// that resolved a project from the key: that IS the pre-Casbin coarse project
 	// scope. An org-control-plane RPC (OrgFromMessage) is JWT-only and must never
 	// reach here without a customer; if the wiring ever regresses to expose one over
 	// an API key, fail closed rather than silently bypass the role gate. (A valid
