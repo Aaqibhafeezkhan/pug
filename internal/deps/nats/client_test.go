@@ -1,7 +1,9 @@
 package nats
 
 import (
+	"bufio"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,5 +66,51 @@ func TestIsClosed(t *testing.T) {
 		}
 	case <-time.After(250 * time.Millisecond):
 		t.Error("IsClosed waited on the lock a reconnect attempt holds")
+	}
+}
+
+// TestNewMarksClosed pins that a connection from New reports closed once nats.go
+// closes it for good, since /healthz reads only that flag.
+func TestNewMarksClosed(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		_, _ = c.Write([]byte("INFO {\"server_id\":\"fake\",\"max_payload\":1048576}\r\n"))
+		r := bufio.NewReader(c)
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if strings.HasPrefix(line, "PING") {
+				_, _ = c.Write([]byte("PONG\r\n"))
+			}
+		}
+	}()
+
+	t.Setenv("NATS_URL", "nats://"+ln.Addr().String())
+	client, err := New(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.IsClosed() {
+		t.Fatal("a connected client reported closed")
+	}
+
+	client.conn.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for !client.IsClosed() {
+		if time.Now().After(deadline) {
+			t.Fatal("a closed connection never reported closed")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
