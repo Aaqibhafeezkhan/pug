@@ -19,6 +19,48 @@ func TestWhereRefusesATableWithNoCut(t *testing.T) {
 	}
 }
 
+// A whole-second bound skips a part holding only the cut's last second, and on a
+// server behind UTC the hours after the cut sit on the rollup day before it.
+func TestWhereCutsUpToTheCut(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	at := day(2026, 8, 1)
+	for _, c := range []struct {
+		table      string
+		gone, kept time.Time
+	}{
+		{"events", at.Add(-500 * time.Millisecond), at},
+		{"dashboard_event_rollup_daily", at.AddDate(0, 0, -10), at.Add(3 * time.Hour)},
+	} {
+		t.Run(c.table, func(t *testing.T) {
+			ch := testutil.SetupClickHouse(t)
+			ctx := t.Context()
+			p := xid.New().String()
+			testutil.InsertEvent(ctx, t, ch.Conn, uuid.NewString(), p, "gone", "gone", uuid.NewString(), nil, nil, c.gone)
+			testutil.InsertEvent(ctx, t, ch.Conn, uuid.NewString(), p, "kept", "kept", uuid.NewString(), nil, nil, c.kept)
+
+			i := slices.IndexFunc(tables, func(tb table) bool { return tb.name == c.table })
+			where, err := tables[i].where([]string{p}, at)
+			if err != nil {
+				t.Fatalf("where: %v", err)
+			}
+			query, args, err := chq.NewQuery().Select("groupUniqArray(kind)").From(c.table).Where(where).Build()
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			var got []string
+			if err := ch.Conn.QueryRow(ctx, query, args...).Scan(&got); err != nil {
+				t.Fatalf("query: %v", err)
+			}
+			if !slices.Equal(got, []string{"gone"}) {
+				t.Errorf("cuts %v, want only gone", got)
+			}
+		})
+	}
+}
+
 // A table a migration adds and nobody cuts would keep its rows past every length.
 func TestTablesCoverEveryEventTable(t *testing.T) {
 	if testing.Short() {
