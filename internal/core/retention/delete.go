@@ -30,9 +30,12 @@ type table struct {
 }
 
 var tables = []table{
-	{name: "events", before: "occur_time < ?"},
-	// toDate keeps the comparison on days, whatever the server's time zone.
-	{name: "dashboard_event_rollup_daily", before: "day < toDate(?)"},
+	// The driver binds a time as a whole-second toDateTime, which lets ClickHouse
+	// skip a part whose rows all sit in the cut's last second.
+	{name: "events", before: "occur_time < toDateTime64(?, 3)"},
+	// day is the server's local date, so a UTC date would cut hours past the cut
+	// on a server behind UTC.
+	{name: "dashboard_event_rollup_daily", before: "day < toDate(?, timezone())"},
 	{name: "property_keys_event_buckets", before: "bucket_time < ?"},
 	// The key leaves out bot, since it splits one person over several rows.
 	{name: "distinct_id_activity_states", key: "distinct_id", state: "last_seen_state"},
