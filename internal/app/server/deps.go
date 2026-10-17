@@ -36,7 +36,7 @@ type deps struct {
 	port            string
 	drainDelay      time.Duration
 	demoEnabled     bool
-	billingEnabled  bool
+	billing         corebilling.Config
 }
 
 // close shuts down all deps. OTel must shut down last: it owns the slog backend,
@@ -195,6 +195,6 @@ func newDeps(ctx context.Context) (*deps, error) {
 		port:            serverCfg.Port,
 		drainDelay:      serverCfg.DrainDelay,
 		demoEnabled:     serverCfg.DemoEnabled,
-		billingEnabled:  billingCfg.Enabled,
+		billing:         billingCfg,
 	}, nil
 }

@@ -20,7 +20,7 @@ type Plan struct {
 	// tier is unbounded and not listed, so a plan has len(TierUpTo)+1 tiers — and its
 	// provider product one meter per tier.
 	TierUpTo []int64
-	// How far back the plan's history stays queryable. Rendered, never enforced.
+	// How long a subscriber's history is kept (docs/architecture/data-retention.md).
 	RetentionDays int64
 	// A retired plan still resolves for the orgs on it but is never sold again.
 	Retired bool
@@ -58,6 +58,10 @@ const (
 // somebody bought.
 const RetentionYearDays = 365
 
+// freeRetentionDays is what an org with no live subscription keeps, whatever the
+// plan on sale keeps.
+const freeRetentionDays = RetentionYearDays
+
 // catalog is every usage plan pug has ever sold, newest last. Once any org holds a
 // plan its FreeEvents, TierUpTo and RetentionDays are fixed: the tiers must match the
 // meters on its provider product (and on every deal pinned to it), and an edit
@@ -69,7 +73,7 @@ var catalog = []Plan{
 		DisplayName:   "Pay as you go",
 		FreeEvents:    100_000,
 		TierUpTo:      []int64{2_000_000, 15_000_000, 50_000_000, 100_000_000, 250_000_000},
-		RetentionDays: RetentionYearDays,
+		RetentionDays: 5 * RetentionYearDays,
 	},
 }
 
