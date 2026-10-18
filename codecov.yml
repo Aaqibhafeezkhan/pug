@@ -9,3 +9,11 @@ ignore:
   - "internal/lint/**"             # convention analyzers, not product code
   - "internal/app/seed/**"         # demo-traffic seeders, not product code
   - "internal/app/workers/demo/**" # demo-traffic generator, not product code
+
+# Patch coverage gates PRs only; on a push to main it judges a merge commit's
+# whole diff and leaves main red after the PR already passed review.
+coverage:
+  status:
+    patch:
+      default:
+        only_pulls: true
