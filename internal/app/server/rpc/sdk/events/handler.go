@@ -46,6 +46,7 @@ var (
 	cookielessSessionDegradedCounter metric.Int64Counter
 	cookielessIdentitySourceCounter  metric.Int64Counter
 	botTaggedCounter                 metric.Int64Counter
+	acceptedCounter                  metric.Int64Counter
 )
 
 func init() {
@@ -77,6 +78,10 @@ func init() {
 	botTaggedCounter, _ = meter.Int64Counter(
 		"events.bot_tagged_total",
 		metric.WithDescription("Events tagged $bot=true at ingest. signal=user_agent: the User-Agent matched the crawler-user-agents list ($bot_reason is the crawler's name, e.g. HeadlessChrome). signal=asn: CF-ASN named a datacenter-only network ($bot_reason=asn:<n>). Only $platform=web events on public-key requests are ever tagged; nothing is dropped."),
+	)
+	acceptedCounter, _ = meter.Int64Counter(
+		"events.accepted_total",
+		metric.WithDescription("Events published to NATS by BatchCreate, after cookieless drops. auth=pub_key is browser/app SDK traffic, auth=priv_key is server-side."),
 	)
 }
 
@@ -230,6 +235,7 @@ func (s *Server) BatchCreate(
 	if err := s.publisher.Publish(ctx, principal.Project.ID, events); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to accept events"))
 	}
+	acceptedCounter.Add(ctx, int64(len(events)), metric.WithAttributes(attribute.String("auth", string(principal.AuthType))))
 
 	return batchResponse(len(events), drops), nil
 }
