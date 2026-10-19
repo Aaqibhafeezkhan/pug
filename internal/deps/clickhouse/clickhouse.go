@@ -33,10 +33,11 @@ type Conn struct {
 
 var _ chdriver.Conn = (*Conn)(nil)
 
-// A canceled context is the caller walking away (a client closing its stream),
-// not a failed query, so it stays off the span's error status.
+// A canceled context is the caller giving up, not a failed query, so it marks the
+// span with an event rather than an error status.
 func recordError(span trace.Span, err error) {
 	if errors.Is(err, context.Canceled) {
+		span.AddEvent("canceled")
 		return
 	}
 	telemetry.RecordErrorOnSpan(span, err)

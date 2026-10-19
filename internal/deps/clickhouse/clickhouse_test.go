@@ -763,8 +763,8 @@ func TestQueryCanceledLeavesSpanUnset(t *testing.T) {
 	if span.Status.Code != codes.Unset {
 		t.Errorf("canceled query left span status %v, want Unset", span.Status.Code)
 	}
-	if n := exceptionCount(span.Events); n != 0 {
-		t.Errorf("recorded %d exceptions for a cancel, want 0", n)
+	if len(span.Events) != 1 || span.Events[0].Name != "canceled" {
+		t.Errorf("events = %v, want one canceled event", span.Events)
 	}
 }
 
@@ -780,7 +780,7 @@ func TestQueryEagerCanceledLeavesSpanUnset(t *testing.T) {
 	if span.Status.Code != codes.Unset {
 		t.Errorf("canceled query left span status %v, want Unset", span.Status.Code)
 	}
-	if n := exceptionCount(span.Events); n != 0 {
-		t.Errorf("recorded %d exceptions for a cancel, want 0", n)
+	if len(span.Events) != 1 || span.Events[0].Name != "canceled" {
+		t.Errorf("events = %v, want one canceled event", span.Events)
 	}
 }

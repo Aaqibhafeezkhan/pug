@@ -190,6 +190,10 @@ func NewServer(producer jetstream.JetStream, geoProvider geo.Provider, uaParser 
 	}
 }
 
+// Caps the per-event Redis calls of a detached batch. Past it, sessions fall back to
+// one per visitor-day, and the reply still beats sdk-web's 5s timeout and its resend.
+const cookielessResolveTimeout = 3 * time.Second
+
 func (s *Server) BatchCreate(
 	ctx context.Context,
 	req *connect.Request[eventsv1.BatchCreateRequest],
@@ -214,11 +218,13 @@ func (s *Server) BatchCreate(
 		return nil, apperr.Invalid(apperr.ReasonInvalidEventBatch, err.Error())
 	}
 
-	// A page unload cancels ctx mid-request and the client can't resend, so the
-	// rest outlives it; Redis and JetStream bound each call with their own timeouts.
+	// A page unload aborts the request and its cookieless events have no other
+	// copy, so finish the batch. JetStream times out the publish itself.
 	ctx = context.WithoutCancel(ctx)
 	projectID := principal.Project.ID
-	events, drops, err := s.resolveCookieless(ctx, projectID, req.Header(), req.Peer().Addr, events)
+	resolveCtx, cancel := context.WithTimeout(ctx, cookielessResolveTimeout)
+	events, drops, err := s.resolveCookieless(resolveCtx, projectID, req.Header(), req.Peer().Addr, events)
+	cancel()
 	if err != nil {
 		return nil, err
 	}
