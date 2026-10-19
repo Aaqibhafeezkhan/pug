@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -742,5 +743,44 @@ func TestPrepareBatchEagerErrorEndsSpanAndReturnsNilBatch(t *testing.T) {
 	span := onlySpan(t, exporter)
 	if span.Status.Code != codes.Error {
 		t.Errorf("span status = %v, want Error", span.Status.Code)
+	}
+}
+
+func TestQueryCanceledLeavesSpanUnset(t *testing.T) {
+	exporter := setupTracing(t)
+	c := &Conn{Conn: &fakeConn{rows: &fakeRows{err: context.Canceled}}}
+
+	rows, err := c.Query(context.Background(), "select 1")
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if err := rows.Err(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Err() = %v, want context.Canceled", err)
+	}
+	_ = rows.Close()
+
+	span := onlySpan(t, exporter)
+	if span.Status.Code != codes.Unset {
+		t.Errorf("canceled query left span status %v, want Unset", span.Status.Code)
+	}
+	if len(span.Events) != 1 || span.Events[0].Name != "canceled" {
+		t.Errorf("events = %v, want one canceled event", span.Events)
+	}
+}
+
+func TestQueryEagerCanceledLeavesSpanUnset(t *testing.T) {
+	exporter := setupTracing(t)
+	c := &Conn{Conn: &fakeConn{err: fmt.Errorf("read: %w", context.Canceled)}}
+
+	if _, err := c.Query(context.Background(), "select 1"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+
+	span := onlySpan(t, exporter)
+	if span.Status.Code != codes.Unset {
+		t.Errorf("canceled query left span status %v, want Unset", span.Status.Code)
+	}
+	if len(span.Events) != 1 || span.Events[0].Name != "canceled" {
+		t.Errorf("events = %v, want one canceled event", span.Events)
 	}
 }

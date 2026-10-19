@@ -20,6 +20,7 @@ import (
 	"github.com/pug-sh/pug/internal/apperr"
 	"github.com/pug-sh/pug/internal/attribution"
 	"github.com/pug-sh/pug/internal/autoprop"
+	"github.com/pug-sh/pug/internal/cookieless"
 	coreevents "github.com/pug-sh/pug/internal/core/events"
 	commonv1 "github.com/pug-sh/pug/internal/gen/proto/common/v1"
 	eventsv1 "github.com/pug-sh/pug/internal/gen/proto/sdk/events/v1"
@@ -1158,5 +1159,69 @@ func TestBatchCreateWiresBotEnricher(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+type cancelingResolver struct {
+	stubResolver
+	cancel               context.CancelFunc
+	distinctErr, sessErr error
+}
+
+func (r *cancelingResolver) DayOf(occur time.Time) (cookieless.Day, bool) {
+	r.cancel()
+	return r.stubResolver.DayOf(occur)
+}
+
+func (r *cancelingResolver) DistinctID(ctx context.Context, day cookieless.Day, projectID, ip, ua string) (string, error) {
+	r.distinctErr = ctx.Err()
+	return r.stubResolver.DistinctID(ctx, day, projectID, ip, ua)
+}
+
+func (r *cancelingResolver) SessionID(ctx context.Context, projectID, distinctID string, day cookieless.Day, occur time.Time) (string, cookieless.DegradeReason) {
+	r.sessErr = ctx.Err()
+	return r.stubResolver.SessionID(ctx, projectID, distinctID, day, occur)
+}
+
+type ctxRecordingJetStream struct {
+	stubJetStream
+	ctxErr error
+}
+
+func (s *ctxRecordingJetStream) Publish(ctx context.Context, subject string, data []byte, opts ...jetstream.PublishOpt) (*jetstream.PubAck, error) {
+	s.ctxErr = ctx.Err()
+	return s.stubJetStream.Publish(ctx, subject, data, opts...)
+}
+
+func TestBatchCreatePublishesAfterClientCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(ctxWithProject(context.Background()))
+	defer cancel()
+	js := &ctxRecordingJetStream{}
+	res := &cancelingResolver{
+		dayOK:  true,
+		did:    "cookieless-testhash",
+		sid:    "f47ac10b-58cc-4372-a567-0e02b2c3d999",
+		cancel: cancel,
+	}
+	s := &Server{publisher: coreevents.NewPublisher(js), geoProvider: stubProvider{}, cookieless: res}
+
+	resp, err := s.BatchCreate(ctx, cookielessReq(testCookielessEvent()))
+	if err != nil {
+		t.Fatalf("BatchCreate: %v", err)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("resolver never canceled the request context")
+	}
+	if res.distinctErr != nil || res.sessErr != nil {
+		t.Errorf("Redis calls saw ctx.Err() = %v, %v, want nil after the client went away", res.distinctErr, res.sessErr)
+	}
+	if js.ctxErr != nil {
+		t.Errorf("publish saw ctx.Err() = %v, want nil after the client went away", js.ctxErr)
+	}
+	if js.data == nil {
+		t.Error("batch was not published")
+	}
+	if got := resp.Msg.GetAccepted(); got != 1 {
+		t.Errorf("accepted = %d, want 1", got)
 	}
 }
