@@ -1160,3 +1160,53 @@ func TestBatchCreateWiresBotEnricher(t *testing.T) {
 		})
 	}
 }
+
+type cancelingProvider struct{ cancel context.CancelFunc }
+
+func (p cancelingProvider) Locate(http.Header) geo.Location {
+	p.cancel()
+	return nil
+}
+
+type ctxRecordingJetStream struct {
+	stubJetStream
+	ctxErr error
+}
+
+func (s *ctxRecordingJetStream) Publish(ctx context.Context, subject string, data []byte, opts ...jetstream.PublishOpt) (*jetstream.PubAck, error) {
+	s.ctxErr = ctx.Err()
+	return s.stubJetStream.Publish(ctx, subject, data, opts...)
+}
+
+func TestBatchCreatePublishesAfterClientCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(authn.SetInfo(context.Background(), &rpc.Principal{
+		AuthType: rpc.AuthTypePublicKey,
+		Project:  &dbread.Project{ID: "test-project"},
+	}))
+	defer cancel()
+	js := &ctxRecordingJetStream{}
+	s := &Server{
+		publisher:   coreevents.NewPublisher(js),
+		geoProvider: cancelingProvider{cancel: cancel},
+	}
+	req := connect.NewRequest(&eventsv1.BatchCreateRequest{
+		Events: []*eventsv1.Event{testConsentedEvent("u1")},
+	})
+
+	resp, err := s.BatchCreate(ctx, req)
+	if err != nil {
+		t.Fatalf("BatchCreate: %v", err)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("provider never canceled the request context")
+	}
+	if js.ctxErr != nil {
+		t.Errorf("publish saw ctx.Err() = %v, want nil after the client went away", js.ctxErr)
+	}
+	if js.data == nil {
+		t.Error("batch was not published")
+	}
+	if got := resp.Msg.GetAccepted(); got != 1 {
+		t.Errorf("accepted = %d, want 1", got)
+	}
+}

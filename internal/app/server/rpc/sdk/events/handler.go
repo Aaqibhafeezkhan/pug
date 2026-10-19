@@ -214,6 +214,9 @@ func (s *Server) BatchCreate(
 		return nil, apperr.Invalid(apperr.ReasonInvalidEventBatch, err.Error())
 	}
 
+	// A page unload cancels ctx mid-request and the client can't resend, so the
+	// rest outlives it; Redis and JetStream bound each call with their own timeouts.
+	ctx = context.WithoutCancel(ctx)
 	projectID := principal.Project.ID
 	events, drops, err := s.resolveCookieless(ctx, projectID, req.Header(), req.Peer().Addr, events)
 	if err != nil {

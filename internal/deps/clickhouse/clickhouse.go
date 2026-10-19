@@ -33,6 +33,15 @@ type Conn struct {
 
 var _ chdriver.Conn = (*Conn)(nil)
 
+// A canceled context is the caller walking away (a client closing its stream),
+// not a failed query, so it stays off the span's error status.
+func recordError(span trace.Span, err error) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	telemetry.RecordErrorOnSpan(span, err)
+}
+
 func (c *Conn) withSpan(ctx context.Context) context.Context {
 	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
 		return ch.Context(ctx, ch.WithSpan(span.SpanContext()))
@@ -58,7 +67,7 @@ func (c *Conn) Query(ctx context.Context, query string, args ...any) (chdriver.R
 	c.setSpanAttrs(span, query)
 	rows, err := c.Conn.Query(c.withSpan(ctx), query, args...)
 	if err != nil {
-		telemetry.RecordError(ctx, err)
+		recordError(span, err)
 		span.End()
 		return nil, err
 	}
@@ -79,7 +88,7 @@ func (c *Conn) Exec(ctx context.Context, query string, args ...any) error {
 	c.setSpanAttrs(span, query)
 	err := c.Conn.Exec(c.withSpan(ctx), query, args...)
 	if err != nil {
-		telemetry.RecordError(ctx, err)
+		recordError(span, err)
 	}
 	return err
 }
@@ -90,7 +99,7 @@ func (c *Conn) Select(ctx context.Context, dest any, query string, args ...any) 
 	c.setSpanAttrs(span, query)
 	err := c.Conn.Select(c.withSpan(ctx), dest, query, args...)
 	if err != nil {
-		telemetry.RecordError(ctx, err)
+		recordError(span, err)
 	}
 	return err
 }
@@ -102,7 +111,7 @@ func (c *Conn) PrepareBatch(ctx context.Context, query string, opts ...chdriver.
 	c.setSpanAttrs(span, query)
 	batch, err := c.Conn.PrepareBatch(c.withSpan(ctx), query, opts...)
 	if err != nil {
-		telemetry.RecordError(ctx, err)
+		recordError(span, err)
 		span.End()
 		return nil, err
 	}
@@ -118,7 +127,7 @@ func (c *Conn) QueryFormat(ctx context.Context, format string, query string, arg
 	span.SetAttributes(attribute.String("db.clickhouse.format", format))
 	stream, err := c.Conn.QueryFormat(c.withSpan(ctx), format, query, args...)
 	if err != nil {
-		telemetry.RecordError(ctx, err)
+		recordError(span, err)
 		span.End()
 		return nil, err
 	}
@@ -132,7 +141,7 @@ func (c *Conn) InsertFormat(ctx context.Context, format string, query string, da
 	span.SetAttributes(attribute.String("db.clickhouse.format", format))
 	err := c.Conn.InsertFormat(c.withSpan(ctx), format, query, data)
 	if err != nil {
-		telemetry.RecordError(ctx, err)
+		recordError(span, err)
 	}
 	return err
 }
@@ -144,7 +153,7 @@ func (c *Conn) AsyncInsert(ctx context.Context, query string, wait bool, args ..
 	ctx = ch.Context(ctx, ch.WithAsync(wait))
 	err := c.Conn.Exec(c.withSpan(ctx), query, args...)
 	if err != nil {
-		telemetry.RecordError(ctx, err)
+		recordError(span, err)
 	}
 	return err
 }
@@ -160,7 +169,7 @@ func (s *formatStream) record(err error) {
 		return
 	}
 	s.recorded = true
-	telemetry.RecordErrorOnSpan(s.span, err)
+	recordError(s.span, err)
 }
 
 func (s *formatStream) Read(p []byte) (int, error) {
@@ -192,7 +201,7 @@ func (r *tracedRows) record(err error) {
 		return
 	}
 	r.recorded = true
-	telemetry.RecordErrorOnSpan(r.span, err)
+	recordError(r.span, err)
 }
 
 func (r *tracedRows) Err() error {
@@ -222,7 +231,7 @@ func (b *tracedBatch) record(err error) {
 		return
 	}
 	b.recorded = true
-	telemetry.RecordErrorOnSpan(b.span, err)
+	recordError(b.span, err)
 }
 
 func (b *tracedBatch) finish(err error) {
