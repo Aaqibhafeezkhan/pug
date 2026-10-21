@@ -81,19 +81,16 @@ func truncateSQL(sql string) string {
 	return sql[:maxLoggedSQLLen] + "...[truncated]"
 }
 
-// isContextError reports whether err is a context cancellation or deadline — a
-// client/request-lifecycle condition, not a ClickHouse fault. Such errors are
-// not logged or recorded (a disconnected or timed-out caller would otherwise
-// manufacture error-rate noise); the wrapped error still propagates so the
-// caller can map it to the right status.
+// isContextError reports a cancel or deadline: the request's lifecycle rather
+// than a query fault, so callers propagate it instead of degrading the result.
 func isContextError(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
-// recordQueryError logs and records a failed query execution at the layer that
-// detects it (per telemetry.md), skipping client context cancellation/deadline.
+// recordQueryError logs and records a failed query at the layer that detects
+// it, except a cancel (per telemetry.md).
 func recordQueryError(ctx context.Context, msg, projectID, sql string, argCount int, err error) {
-	if isContextError(err) {
+	if errors.Is(err, context.Canceled) {
 		return
 	}
 	slog.ErrorContext(ctx, msg, slogx.Error(err),
@@ -125,9 +122,7 @@ func (e *Executor) QueryTrends(ctx context.Context, projectID string, q TrendsQu
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			slog.ErrorContext(ctx, "error closing clickhouse rows", slogx.Error(err),
-				slog.String("project_id", projectID))
-			telemetry.RecordError(ctx, err)
+			recordQueryError(ctx, "error closing clickhouse rows", projectID, sql, len(args), err)
 		}
 	}()
 
@@ -149,9 +144,7 @@ func (e *Executor) QueryTrends(ctx context.Context, projectID string, q TrendsQu
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
-		slog.ErrorContext(ctx, "clickhouse: query trends iteration failed", slogx.Error(err),
-			slog.String("project_id", projectID))
-		telemetry.RecordError(ctx, err)
+		recordQueryError(ctx, "clickhouse: query trends iteration failed", projectID, sql, len(args), err)
 		return nil, fmt.Errorf("QueryTrends: %w", err)
 	}
 	return result, nil
@@ -168,9 +161,7 @@ func (e *Executor) QueryScalar(ctx context.Context, projectID string, q ScalarQu
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			slog.ErrorContext(ctx, "error closing clickhouse rows", slogx.Error(err),
-				slog.String("project_id", projectID))
-			telemetry.RecordError(ctx, err)
+			recordQueryError(ctx, "error closing clickhouse rows", projectID, sql, len(args), err)
 		}
 	}()
 
@@ -184,9 +175,7 @@ func (e *Executor) QueryScalar(ctx context.Context, projectID string, q ScalarQu
 		}
 	}
 	if err := rows.Err(); err != nil {
-		slog.ErrorContext(ctx, "clickhouse: query scalar iteration failed", slogx.Error(err),
-			slog.String("project_id", projectID))
-		telemetry.RecordError(ctx, err)
+		recordQueryError(ctx, "clickhouse: query scalar iteration failed", projectID, sql, len(args), err)
 		return 0, fmt.Errorf("QueryScalar: %w", err)
 	}
 	return value, nil
@@ -213,9 +202,7 @@ func (e *Executor) QueryAggregateKeys(ctx context.Context, projectID string, sql
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			slog.ErrorContext(ctx, "error closing clickhouse rows", slogx.Error(err),
-				slog.String("project_id", projectID))
-			telemetry.RecordError(ctx, err)
+			recordQueryError(ctx, "error closing clickhouse rows", projectID, sql, len(args), err)
 		}
 	}()
 
@@ -241,9 +228,7 @@ func (e *Executor) QueryAggregateKeys(ctx context.Context, projectID string, sql
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
-		slog.ErrorContext(ctx, "clickhouse: query aggregate keys iteration failed", slogx.Error(err),
-			slog.String("project_id", projectID))
-		telemetry.RecordError(ctx, err)
+		recordQueryError(ctx, "clickhouse: query aggregate keys iteration failed", projectID, sql, len(args), err)
 		return nil, fmt.Errorf("QueryAggregateKeys: %w", err)
 	}
 	return result, nil
@@ -258,9 +243,7 @@ func (e *Executor) QueryStringColumn(ctx context.Context, projectID string, sql 
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			slog.ErrorContext(ctx, "error closing clickhouse rows", slogx.Error(err),
-				slog.String("project_id", projectID))
-			telemetry.RecordError(ctx, err)
+			recordQueryError(ctx, "error closing clickhouse rows", projectID, sql, len(args), err)
 		}
 	}()
 
@@ -276,9 +259,7 @@ func (e *Executor) QueryStringColumn(ctx context.Context, projectID string, sql 
 		result = append(result, id)
 	}
 	if err := rows.Err(); err != nil {
-		slog.ErrorContext(ctx, "clickhouse: query string column iteration failed", slogx.Error(err),
-			slog.String("project_id", projectID))
-		telemetry.RecordError(ctx, err)
+		recordQueryError(ctx, "clickhouse: query string column iteration failed", projectID, sql, len(args), err)
 		return nil, fmt.Errorf("QueryStringColumn: %w", err)
 	}
 	return result, nil
@@ -296,9 +277,7 @@ func (e *Executor) QueryFunnel(ctx context.Context, projectID string, q FunnelQu
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			slog.ErrorContext(ctx, "error closing clickhouse rows", slogx.Error(err),
-				slog.String("project_id", projectID))
-			telemetry.RecordError(ctx, err)
+			recordQueryError(ctx, "error closing clickhouse rows", projectID, sql, len(args), err)
 		}
 	}()
 
@@ -320,9 +299,7 @@ func (e *Executor) QueryFunnel(ctx context.Context, projectID string, q FunnelQu
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
-		slog.ErrorContext(ctx, "clickhouse: query funnel iteration failed", slogx.Error(err),
-			slog.String("project_id", projectID))
-		telemetry.RecordError(ctx, err)
+		recordQueryError(ctx, "clickhouse: query funnel iteration failed", projectID, sql, len(args), err)
 		return nil, fmt.Errorf("QueryFunnel: %w", err)
 	}
 	// ClickHouse UNION ALL does not reliably apply a trailing ORDER BY across
@@ -356,9 +333,7 @@ func (e *Executor) QueryUserFlow(ctx context.Context, projectID string, q UserFl
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			slog.ErrorContext(ctx, "error closing clickhouse rows", slogx.Error(err),
-				slog.String("project_id", projectID))
-			telemetry.RecordError(ctx, err)
+			recordQueryError(ctx, "error closing clickhouse rows", projectID, sql, len(args), err)
 		}
 	}()
 
@@ -381,9 +356,7 @@ func (e *Executor) QueryUserFlow(ctx context.Context, projectID string, q UserFl
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
-		slog.ErrorContext(ctx, "clickhouse: query user flow iteration failed", slogx.Error(err),
-			slog.String("project_id", projectID))
-		telemetry.RecordError(ctx, err)
+		recordQueryError(ctx, "clickhouse: query user flow iteration failed", projectID, sql, len(args), err)
 		return nil, fmt.Errorf("QueryUserFlow: %w", err)
 	}
 	return result, nil
@@ -413,9 +386,7 @@ func (e *Executor) QueryTopK(ctx context.Context, projectID string, q TopKQuery)
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			slog.ErrorContext(ctx, "error closing clickhouse rows", slogx.Error(err),
-				slog.String("project_id", projectID))
-			telemetry.RecordError(ctx, err)
+			recordQueryError(ctx, "error closing clickhouse rows", projectID, sql, len(args), err)
 		}
 	}()
 
@@ -435,9 +406,7 @@ func (e *Executor) QueryTopK(ctx context.Context, projectID string, q TopKQuery)
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
-		slog.ErrorContext(ctx, "clickhouse: query top k iteration failed", slogx.Error(err),
-			slog.String("project_id", projectID))
-		telemetry.RecordError(ctx, err)
+		recordQueryError(ctx, "clickhouse: query top k iteration failed", projectID, sql, len(args), err)
 		return nil, fmt.Errorf("QueryTopK: %w", err)
 	}
 	return result, nil
@@ -461,9 +430,7 @@ func (e *Executor) QueryTopKProfiles(ctx context.Context, projectID string, sql 
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			slog.ErrorContext(ctx, "error closing clickhouse rows", slogx.Error(err),
-				slog.String("project_id", projectID))
-			telemetry.RecordError(ctx, err)
+			recordQueryError(ctx, "error closing clickhouse rows", projectID, sql, len(args), err)
 		}
 	}()
 
@@ -488,9 +455,7 @@ func (e *Executor) QueryTopKProfiles(ctx context.Context, projectID string, sql 
 		result[row.ID] = row
 	}
 	if err := rows.Err(); err != nil {
-		slog.ErrorContext(ctx, "clickhouse: query top k profiles iteration failed", slogx.Error(err),
-			slog.String("project_id", projectID))
-		telemetry.RecordError(ctx, err)
+		recordQueryError(ctx, "clickhouse: query top k profiles iteration failed", projectID, sql, len(args), err)
 		return nil, fmt.Errorf("QueryTopKProfiles: %w", err)
 	}
 	return result, nil
@@ -509,9 +474,7 @@ func (e *Executor) QueryFunnelUserEvents(ctx context.Context, projectID string, 
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			slog.ErrorContext(ctx, "error closing clickhouse rows", slogx.Error(err),
-				slog.String("project_id", projectID))
-			telemetry.RecordError(ctx, err)
+			recordQueryError(ctx, "error closing clickhouse rows", projectID, sql, len(args), err)
 		}
 	}()
 
@@ -532,9 +495,7 @@ func (e *Executor) QueryFunnelUserEvents(ctx context.Context, projectID string, 
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
-		slog.ErrorContext(ctx, "clickhouse: query funnel user events iteration failed", slogx.Error(err),
-			slog.String("project_id", projectID))
-		telemetry.RecordError(ctx, err)
+		recordQueryError(ctx, "clickhouse: query funnel user events iteration failed", projectID, sql, len(args), err)
 		return nil, fmt.Errorf("QueryFunnelUserEvents: %w", err)
 	}
 	return result, nil
@@ -552,9 +513,7 @@ func (e *Executor) QueryRetention(ctx context.Context, projectID string, q Reten
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			slog.ErrorContext(ctx, "error closing clickhouse rows", slogx.Error(err),
-				slog.String("project_id", projectID))
-			telemetry.RecordError(ctx, err)
+			recordQueryError(ctx, "error closing clickhouse rows", projectID, sql, len(args), err)
 		}
 	}()
 
@@ -575,9 +534,7 @@ func (e *Executor) QueryRetention(ctx context.Context, projectID string, q Reten
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
-		slog.ErrorContext(ctx, "clickhouse: query retention iteration failed", slogx.Error(err),
-			slog.String("project_id", projectID))
-		telemetry.RecordError(ctx, err)
+		recordQueryError(ctx, "clickhouse: query retention iteration failed", projectID, sql, len(args), err)
 		return nil, fmt.Errorf("QueryRetention: %w", err)
 	}
 	return result, nil
