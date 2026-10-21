@@ -137,29 +137,32 @@ func TestDashboardGranularityFromDB(t *testing.T) {
 	}
 }
 
-// TestRecordServiceError_SkipsContextErrors pins that a client cancellation/deadline
-// is returned unchanged but not logged/recorded (it would manufacture error-rate
-// noise), while a genuine failure is both returned and logged at the detecting layer.
-func TestRecordServiceError_SkipsContextErrors(t *testing.T) {
+// TestRecordServiceError_SkipsACancel pins that a canceled request's error is
+// returned unchanged but not logged/recorded, while a genuine failure, a deadline
+// or a cancel on a live request is both returned and logged at the detecting layer.
+func TestRecordServiceError_SkipsACancel(t *testing.T) {
 	var buf bytes.Buffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	if err := recordServiceError(context.Background(), "boom", context.Canceled); !errors.Is(err, context.Canceled) {
-		t.Fatalf("context error: got %v, want context.Canceled", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := recordServiceError(ctx, "boom", context.Canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel: got %v, want context.Canceled", err)
 	}
 	if buf.Len() != 0 {
-		t.Errorf("context error must not be logged, got: %s", buf.String())
+		t.Errorf("a cancel must not be logged, got: %s", buf.String())
 	}
 
-	buf.Reset()
-	sentinel := errors.New("db exploded")
-	if err := recordServiceError(context.Background(), "boom", sentinel); !errors.Is(err, sentinel) {
-		t.Fatalf("real error: got %v, want sentinel", err)
-	}
-	if !strings.Contains(buf.String(), "boom") {
-		t.Errorf("real error must be logged, got: %q", buf.String())
+	for _, failure := range []error{errors.New("db exploded"), context.DeadlineExceeded, context.Canceled} {
+		buf.Reset()
+		if err := recordServiceError(context.Background(), "boom", failure); !errors.Is(err, failure) {
+			t.Fatalf("got %v, want %v", err, failure)
+		}
+		if !strings.Contains(buf.String(), "boom") {
+			t.Errorf("%v must be logged, got: %q", failure, buf.String())
+		}
 	}
 }
 

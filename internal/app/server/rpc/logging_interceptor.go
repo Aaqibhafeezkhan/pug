@@ -72,13 +72,13 @@ func logRPC(ctx context.Context, err error, args []any) {
 }
 
 func isClientError(err error) bool {
-	// Client-driven cancellations and deadline expirations are client-class. A raw
-	// context error reports connect.CodeOf == CodeUnknown (Connect only decodes its
-	// own *connect.Error), so match them explicitly before the code switch;
-	// errors.Is also catches a wrapped context error. sanitizeError returns the bare
-	// context error for these, so this check is what keeps cancellations out of
-	// ERROR logs.
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	// A cancel is client-class; a deadline is server-class, as in the switch below,
+	// since the request outran its budget. A raw context error reports
+	// connect.CodeOf == CodeUnknown (Connect only decodes its own *connect.Error),
+	// so match a cancel explicitly before the code switch; errors.Is also catches a
+	// wrapped one. sanitizeError returns the bare context error, so this check is
+	// what keeps cancellations out of ERROR logs.
+	if errors.Is(err, context.Canceled) {
 		return true
 	}
 	code := connect.CodeOf(err)

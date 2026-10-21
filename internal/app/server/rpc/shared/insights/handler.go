@@ -60,16 +60,23 @@ func (s *server) Query(
 
 	resp, err := coreinsights.ExecuteQuery(ctx, s.executor, principal.Project.ID, req.Msg, time.Now())
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, rpc.ConnectCtxErr(err)
-		}
 		if invalid, ok := errors.AsType[*coreinsights.InvalidQueryError](err); ok {
 			return nil, apperr.Invalid(apperr.ReasonInvalidInsightQuery, "invalid query parameters: "+invalid.Message)
 		}
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		return nil, serviceErrToConnect(ctx)
 	}
 
 	return connect.NewResponse(resp), nil
+}
+
+// serviceErrToConnect maps a failed read by the request's own context, since the
+// driver can report an expired deadline as a plain i/o timeout. The failure is
+// already logged unless it was a cancel.
+func serviceErrToConnect(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return rpc.ConnectCtxErr(err)
+	}
+	return connect.NewError(connect.CodeInternal, errors.New("internal error"))
 }
 
 // SegmentUsers returns a paginated list of distinct user IDs matching the given filters.
@@ -95,7 +102,7 @@ func (s *server) SegmentUsers(
 
 	ids, err := s.executor.QueryStringColumn(ctx, principal.Project.ID, sql, args)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		return nil, serviceErrToConnect(ctx)
 	}
 
 	pageSize := req.Msg.GetPageSize()
@@ -136,7 +143,7 @@ func (s *server) GetFilterSchema(
 
 	schema, err := s.service.GetFilterSchema(ctx, projectID, req.Msg.GetEventKind(), req.Msg.GetAllowedTypes())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		return nil, serviceErrToConnect(ctx)
 	}
 
 	return connect.NewResponse(schema), nil
@@ -159,7 +166,7 @@ func (s *server) GetPropertyValues(
 
 	values, err := s.service.GetPropertyValues(ctx, projectID, req.Msg.GetPropertyKey(), req.Msg.GetEventKind(), req.Msg.GetSource())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		return nil, serviceErrToConnect(ctx)
 	}
 
 	return connect.NewResponse(&insightsv1.GetPropertyValuesResponse{Values: values}), nil

@@ -40,6 +40,16 @@ func NewServer(ch driver.Conn, insightsService *coreinsights.Service, profilesRe
 	}
 }
 
+// serviceErrToConnect maps a failed read by the request's own context, since the
+// driver can report an expired deadline as a plain i/o timeout. The failure is
+// already logged unless it was a cancel.
+func serviceErrToConnect(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return rpc.ConnectCtxErr(err)
+	}
+	return connect.NewError(connect.CodeInternal, errors.New("internal error"))
+}
+
 func (s *server) GetActivityFeed(
 	ctx context.Context,
 	req *connect.Request[activityv1.GetActivityFeedRequest],
@@ -80,7 +90,7 @@ func (s *server) GetActivityFeed(
 				slog.String("project_id", principal.Project.ID))
 			return nil, apperr.Invalid(apperr.ReasonInvalidActivityFilter, "invalid filter parameters")
 		}
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		return nil, serviceErrToConnect(ctx)
 	}
 
 	protoEvents, err := eventsToProto(ctx, evts, principal.Project.ID)
@@ -144,7 +154,7 @@ func (s *server) GetEventExplorer(
 				slog.String("project_id", principal.Project.ID))
 			return nil, apperr.Invalid(apperr.ReasonInvalidActivityFilter, "invalid filter parameters")
 		}
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		return nil, serviceErrToConnect(ctx)
 	}
 
 	protoEvents, err := eventsToProto(ctx, evts, principal.Project.ID)
@@ -240,7 +250,7 @@ func (s *server) GetActivityHeatmap(
 		IncludeBots: req.Msg.GetIncludeBots(),
 	})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		return nil, serviceErrToConnect(ctx)
 	}
 
 	heatmapDays := make([]*activityv1.HeatmapDay, len(days))
@@ -300,7 +310,7 @@ func (s *server) GetProfileSessions(
 			return nil, apperr.Invalid(apperr.ReasonInvalidPageToken,
 				"page token was issued for a different sort; restart from an empty token to change it")
 		}
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		return nil, serviceErrToConnect(ctx)
 	}
 
 	resp := &activityv1.GetProfileSessionsResponse{
@@ -351,7 +361,7 @@ func (s *server) GetProfileStats(
 		IncludeBots: req.Msg.GetIncludeBots(),
 	})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		return nil, serviceErrToConnect(ctx)
 	}
 
 	resp := &activityv1.GetProfileStatsResponse{}
@@ -381,12 +391,14 @@ func (s *server) GetProfileStats(
 		ProjectID: principal.Project.ID,
 	})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		slog.ErrorContext(ctx, "failed to get profile properties",
-			slogx.Error(err),
-			slog.String("project_id", principal.Project.ID),
-			slog.String("distinct_id", req.Msg.GetDistinctId()))
-		telemetry.RecordError(ctx, err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			slog.ErrorContext(ctx, "failed to get profile properties",
+				slogx.Error(err),
+				slog.String("project_id", principal.Project.ID),
+				slog.String("distinct_id", req.Msg.GetDistinctId()))
+			telemetry.RecordError(ctx, err)
+		}
+		return nil, serviceErrToConnect(ctx)
 	}
 	if err == nil {
 		props, err := structpb.NewStruct(profile.Properties)
@@ -421,7 +433,7 @@ func (s *server) GetFilterSchema(
 
 	schema, err := s.insightsService.GetFilterSchema(ctx, projectID, req.Msg.GetEventKind(), req.Msg.GetAllowedTypes())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		return nil, serviceErrToConnect(ctx)
 	}
 
 	return connect.NewResponse(schema), nil
@@ -444,7 +456,7 @@ func (s *server) GetPropertyValues(
 
 	values, err := s.insightsService.GetPropertyValues(ctx, projectID, req.Msg.GetPropertyKey(), req.Msg.GetEventKind(), req.Msg.GetSource())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
+		return nil, serviceErrToConnect(ctx)
 	}
 
 	return connect.NewResponse(&activityv1.GetPropertyValuesResponse{Values: values}), nil

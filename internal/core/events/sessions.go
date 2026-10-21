@@ -276,8 +276,7 @@ func (r *Reader) GetProfileSessions(
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			slog.ErrorContext(ctx, "failed to close ClickHouse rows", slogx.Error(err))
-			telemetry.RecordError(ctx, err)
+			recordReadError(ctx, "failed to close ClickHouse rows", err)
 		}
 	}()
 
@@ -308,16 +307,7 @@ func (r *Reader) GetProfileSessions(
 	return sessions, nextCursor, nil
 }
 
-// recordSessionQueryErr logs and records at the detecting layer, except for a
-// cancelled or timed-out context: this query is long enough that a client
-// navigating away is routine, and the handler already maps it to the right code.
 func recordSessionQueryErr(ctx context.Context, projectID, stage string, err error) error {
-	wrapped := fmt.Errorf("GetProfileSessions: %s for project %s: %w", stage, projectID, err)
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return wrapped
-	}
-	slog.ErrorContext(ctx, "GetProfileSessions: "+stage, slogx.Error(err),
-		slog.String("project_id", projectID))
-	telemetry.RecordError(ctx, err)
-	return wrapped
+	recordReadError(ctx, "GetProfileSessions: "+stage, err, slog.String("project_id", projectID))
+	return fmt.Errorf("GetProfileSessions: %s for project %s: %w", stage, projectID, err)
 }
