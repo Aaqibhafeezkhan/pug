@@ -134,10 +134,10 @@ func NewReader(ch driver.Conn) *Reader {
 	return &Reader{ch: ch}
 }
 
-// recordReadError logs and records a failed read, except a cancel: the caller
-// chose to leave. A deadline is logged, since the query outran its budget.
+// recordReadError logs and records a failed read, except on a canceled request:
+// the caller chose to leave. A deadline is logged, since the query outran its budget.
 func recordReadError(ctx context.Context, msg string, err error, attrs ...any) {
-	if errors.Is(err, context.Canceled) {
+	if errors.Is(ctx.Err(), context.Canceled) {
 		return
 	}
 	slog.ErrorContext(ctx, msg, append([]any{slogx.Error(err)}, attrs...)...)

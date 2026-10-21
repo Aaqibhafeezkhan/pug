@@ -68,6 +68,7 @@ func TestReadFailuresKeepTheirCode(t *testing.T) {
 		{"canceled", true, nil, connect.CodeCanceled},
 		{"failed", false, errors.New("boom"), connect.CodeInternal},
 		{"dial timeout", false, fmt.Errorf("dial tcp: %w", context.DeadlineExceeded), connect.CodeInternal},
+		{"stray cancel", false, context.Canceled, connect.CodeInternal},
 	} {
 		for name, call := range calls {
 			ctx, cancel := context.WithCancel(authn.SetInfo(context.Background(), &rpc.Principal{

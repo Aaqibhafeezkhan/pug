@@ -391,7 +391,7 @@ func (s *server) GetProfileStats(
 		ProjectID: principal.Project.ID,
 	})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		if !errors.Is(err, context.Canceled) {
+		if !errors.Is(ctx.Err(), context.Canceled) {
 			slog.ErrorContext(ctx, "failed to get profile properties",
 				slogx.Error(err),
 				slog.String("project_id", principal.Project.ID),

@@ -678,7 +678,7 @@ func (s *Service) GetDeletionRequest(ctx context.Context, projectID, requestID s
 		if errors.Is(err, pgx.ErrNoRows) {
 			return dbread.ComplianceRequest{}, ErrDeletionRequestNotFound
 		}
-		if !errors.Is(err, context.Canceled) {
+		if !errors.Is(ctx.Err(), context.Canceled) {
 			slog.ErrorContext(ctx, "failed loading deletion request", slogx.Error(err),
 				slog.String("request_id", requestID), slog.String("project_id", projectID))
 			telemetry.RecordError(ctx, err)

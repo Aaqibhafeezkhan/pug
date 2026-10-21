@@ -85,6 +85,8 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 // identity lookup, the alias lookup or the events read, at the start or mid-stream.
 func TestReadsDoNotLogACancel(t *testing.T) {
 	logs := captureLogs(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	for _, tc := range reads {
 		conns := []failingConn{
 			{err: context.Canceled},
@@ -99,7 +101,7 @@ func TestReadsDoNotLogACancel(t *testing.T) {
 		}
 		for _, conn := range conns {
 			logs.Reset()
-			err := tc.read(context.Background(), events.NewReader(conn))
+			err := tc.read(ctx, events.NewReader(conn))
 			if !errors.Is(err, context.Canceled) {
 				t.Errorf("%s %v: err = %v, want canceled", tc.name, conn, err)
 			}
@@ -110,12 +112,12 @@ func TestReadsDoNotLogACancel(t *testing.T) {
 	}
 }
 
-// A deadline means the query outran the request's budget, so it logs like any
-// failure.
+// A deadline means the query outran the request's budget, and a cancel on a live
+// request came from something other than the caller, so both log like any failure.
 func TestReadsLogAFailure(t *testing.T) {
 	logs := captureLogs(t)
 	for _, tc := range reads {
-		for _, cause := range []error{errors.New("boom"), context.DeadlineExceeded} {
+		for _, cause := range []error{errors.New("boom"), context.DeadlineExceeded, context.Canceled} {
 			for _, conn := range []failingConn{
 				{err: cause},
 				{err: cause, midStream: true},

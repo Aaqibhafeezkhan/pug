@@ -77,9 +77,10 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-func TestListCanceledMidReadIsCanceled(t *testing.T) {
-	logs := captureLogs(t)
-	conn := &cancelingConn{}
+// runList streams one List through a real handler and returns what the handler
+// returned. Unless conn.err is set, conn cancels the request mid-read.
+func runList(t *testing.T, conn *cancelingConn) error {
+	t.Helper()
 	errs := make(handlerErrs, 1)
 	path, handler := profilesv1connect.NewProfilesServiceHandler(
 		NewServer(coreprofiles.NewService(nil, conn, &natsdeps.NATSClient{})),
@@ -111,14 +112,33 @@ func TestListCanceledMidReadIsCanceled(t *testing.T) {
 	// already here; nothing would arrive if the handler panicked.
 	select {
 	case err := <-errs:
-		if got := connect.CodeOf(err); got != connect.CodeCanceled {
-			t.Errorf("handler code = %v, want canceled", got)
-		}
+		return err
 	default:
 		t.Fatal("the handler returned no error")
+		return nil
+	}
+}
+
+func TestListCanceledMidReadIsCanceled(t *testing.T) {
+	logs := captureLogs(t)
+	if got := connect.CodeOf(runList(t, &cancelingConn{})); got != connect.CodeCanceled {
+		t.Errorf("handler code = %v, want canceled", got)
 	}
 	if strings.Contains(logs.String(), "level=ERROR") {
 		t.Errorf("a canceled List logged an error:\n%s", logs)
+	}
+}
+
+func TestListFailureIsInternal(t *testing.T) {
+	logs := captureLogs(t)
+	for _, cause := range []error{errors.New("boom"), context.Canceled} {
+		logs.Reset()
+		if got := connect.CodeOf(runList(t, &cancelingConn{err: cause})); got != connect.CodeInternal {
+			t.Errorf("%v: handler code = %v, want internal", cause, got)
+		}
+		if !strings.Contains(logs.String(), "failed listing profiles") {
+			t.Errorf("%v did not log the failure:\n%s", cause, logs)
+		}
 	}
 }
 
@@ -149,11 +169,12 @@ func TestGetCanceledIsCanceled(t *testing.T) {
 }
 
 // A failure on a live request still logs and stays INTERNAL, even one that only
-// wraps a deadline, as a ClickHouse dial timeout does.
+// wraps a deadline, as a ClickHouse dial timeout does, or a cancel the caller
+// did not make.
 func TestGetFailureIsInternal(t *testing.T) {
 	logs := captureLogs(t)
 	for name, get := range gets {
-		for _, cause := range []error{errors.New("boom"), context.DeadlineExceeded} {
+		for _, cause := range []error{errors.New("boom"), context.DeadlineExceeded, context.Canceled} {
 			logs.Reset()
 			s := NewServer(coreprofiles.NewService(nil, &cancelingConn{err: cause}, &natsdeps.NATSClient{}))
 			if got := connect.CodeOf(get(s, authCtx("p"))); got != connect.CodeInternal {

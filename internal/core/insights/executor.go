@@ -88,9 +88,9 @@ func isContextError(err error) bool {
 }
 
 // recordQueryError logs and records a failed query at the layer that detects
-// it, except a cancel (per telemetry.md).
+// it, except on a canceled request (per telemetry.md).
 func recordQueryError(ctx context.Context, msg, projectID, sql string, argCount int, err error) {
-	if errors.Is(err, context.Canceled) {
+	if errors.Is(ctx.Err(), context.Canceled) {
 		return
 	}
 	slog.ErrorContext(ctx, msg, slogx.Error(err),

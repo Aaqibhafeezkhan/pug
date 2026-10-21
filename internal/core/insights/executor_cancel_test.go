@@ -78,10 +78,12 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 // from Err and Close too.
 func TestExecutorDoesNotLogACancel(t *testing.T) {
 	logs := captureLogs(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	for _, midStream := range []bool{false, true} {
 		for name, query := range executorQueries(NewExecutor(streamConn{err: context.Canceled, midStream: midStream})) {
 			logs.Reset()
-			if err := query(context.Background()); !errors.Is(err, context.Canceled) {
+			if err := query(ctx); !errors.Is(err, context.Canceled) {
 				t.Errorf("%s (midStream=%t): err = %v", name, midStream, err)
 			}
 			if strings.Contains(logs.String(), "level=ERROR") {
@@ -91,11 +93,11 @@ func TestExecutorDoesNotLogACancel(t *testing.T) {
 	}
 }
 
-// A deadline means the query outran the request's budget, so it logs like any
-// failure.
+// A deadline means the query outran the request's budget, and a cancel on a live
+// request came from something other than the caller, so both log like any failure.
 func TestExecutorLogsAFailedStream(t *testing.T) {
 	logs := captureLogs(t)
-	for _, cause := range []error{errors.New("boom"), context.DeadlineExceeded} {
+	for _, cause := range []error{errors.New("boom"), context.DeadlineExceeded, context.Canceled} {
 		for name, query := range executorQueries(NewExecutor(streamConn{err: cause, midStream: true})) {
 			logs.Reset()
 			if err := query(context.Background()); !errors.Is(err, cause) {

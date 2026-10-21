@@ -278,7 +278,7 @@ func (s *Server) List(
 			Sort:        sort,
 		})
 		if err != nil {
-			if !errors.Is(err, context.Canceled) {
+			if !errors.Is(ctx.Err(), context.Canceled) {
 				slog.ErrorContext(ctx, "failed listing profiles",
 					slogx.Error(err),
 					slog.String("project_id", principal.Project.ID),
@@ -391,7 +391,7 @@ func (s *Server) getProfile(ctx context.Context, projectID, id string, includeBo
 		if errors.Is(err, coreprofiles.ErrProfileNotFound) {
 			return nil, apperr.NotFound(apperr.ReasonProfileNotFound, "profile not found", apperr.Resource("profile", id))
 		}
-		if !errors.Is(err, context.Canceled) {
+		if !errors.Is(ctx.Err(), context.Canceled) {
 			slog.ErrorContext(ctx, "failed reading profile from clickhouse", slogx.Error(err), slog.String("profile_id", id))
 			telemetry.RecordError(ctx, err)
 		}
@@ -418,7 +418,7 @@ func (s *Server) getProfileByExternalID(ctx context.Context, projectID, external
 		if errors.Is(err, coreprofiles.ErrProfileNotFound) {
 			return nil, apperr.NotFound(apperr.ReasonProfileNotFound, "profile not found", apperr.Resource("profile", externalID))
 		}
-		if !errors.Is(err, context.Canceled) {
+		if !errors.Is(ctx.Err(), context.Canceled) {
 			slog.ErrorContext(ctx, "failed reading profile by external ID from clickhouse", slogx.Error(err), slog.String("external_id", externalID))
 			telemetry.RecordError(ctx, err)
 		}
