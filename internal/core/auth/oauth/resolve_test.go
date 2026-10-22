@@ -105,7 +105,7 @@ func TestWithIdentityTx_LinksExistingEmailPasswordCustomer(t *testing.T) {
 	db := testutil.SetupPostgres(t)
 	ctx := context.Background()
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("bcrypt: %v", err)
 	}

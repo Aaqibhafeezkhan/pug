@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/testcontainers/testcontainers-go"
 )
 
 // cleanupDropTimeout bounds the per-test cleanup that drops a database or flushes
@@ -20,22 +22,19 @@ import (
 // fails and leaves its data behind) and far shorter than the suite timeout.
 const cleanupDropTimeout = 30 * time.Second
 
-// Main runs a package's tests and then tears down the containers they shared.
+// Main runs a package's tests and then releases the containers they shared.
 //
 // Every package whose tests call a Setup* helper must wire this up:
 //
 //	func TestMain(m *testing.M) { testutil.Main(m) }
 //
-// The Setup* helpers start one container per test binary rather than one per
-// test, so a container has no owning test to hang a t.Cleanup on and would
-// otherwise outlive the run. TestSetupCallersWireMain enforces the wiring.
-//
-// The teardown below only covers a normal finish. A panicking test, an expired
-// -timeout or a Ctrl-C all kill the process without m.Run ever returning, and a
-// panic on a test's goroutine will not run a defer on this one, so there is no
-// arrangement here that would cover them. forceRyuk is what covers them.
+// Containers outlive the tests that start them, so Ryuk reaps them, even after
+// a crash. The teardown closes the package's pools and drops its ClickHouse
+// template, killing the containers only when Ryuk is off.
+// TestSetupCallersWireMain enforces the wiring.
 func Main(m *testing.M) {
 	forceRyuk()
+	extendRyukGrace()
 
 	code := m.Run()
 
@@ -49,21 +48,9 @@ func Main(m *testing.M) {
 	os.Exit(code)
 }
 
-// forceRyuk turns testcontainers' reaper on for this test binary, overriding a
-// ~/.testcontainers.properties that disables it.
-//
-// Ryuk is a container the test process holds a TCP connection to; it kills
-// everything this session labelled once that connection drops. That makes it the
-// only thing that reaps a package's containers when the process dies without
-// reaching shutdown. Back when a container belonged to a single test, leaking one
-// was survivable and disabling Ryuk cost little; one container per binary shared
-// by every test in it is not, hence overriding a preference rather than reading
-// it.
-//
-// The environment beats the properties file, and the config is read once on first
-// use, so setting it before m.Run is what makes it take. An explicit environment
-// opt-out still wins: Ryuk cannot drive every Docker setup, and a run that cannot
-// start it at all is worse than one that leaks on an abnormal exit.
+// forceRyuk turns Ryuk on over a ~/.testcontainers.properties that disables it,
+// since release leaves every container to Ryuk. An explicit environment opt-out
+// still wins, and this must run before testcontainers first reads its config.
 func forceRyuk() {
 	if _, explicit := os.LookupEnv("TESTCONTAINERS_RYUK_DISABLED"); explicit {
 		return
@@ -71,6 +58,52 @@ func forceRyuk() {
 	if err := os.Setenv("TESTCONTAINERS_RYUK_DISABLED", "false"); err != nil {
 		fmt.Fprintf(os.Stderr, "testutil: enable ryuk: %v\n", err)
 	}
+}
+
+// ryukGrace is how long Ryuk waits once no package holds a container before it
+// reaps them all, mid-run included. Building and running packages without
+// containers can open a long gap; waiting longer only delays cleanup.
+const ryukGrace = "3m"
+
+// extendRyukGrace sets ryukGrace unless the environment already sets a timeout.
+// It sets the unprefixed name: testcontainers marks the TESTCONTAINERS_ one for
+// removal.
+func extendRyukGrace() {
+	for _, env := range []string{"RYUK_RECONNECTION_TIMEOUT", "TESTCONTAINERS_RYUK_RECONNECTION_TIMEOUT"} {
+		if os.Getenv(env) != "" {
+			return
+		}
+	}
+	if err := os.Setenv("RYUK_RECONNECTION_TIMEOUT", ryukGrace); err != nil {
+		fmt.Fprintf(os.Stderr, "testutil: extend ryuk grace: %v\n", err)
+	}
+}
+
+// ryukReaps reports whether Ryuk reaps this session's containers, as
+// testcontainers resolves it from the environment and its properties file.
+func ryukReaps() bool {
+	return !testcontainers.ReadConfig().Config.RyukDisabled
+}
+
+// runScopedName names a container every package of this go test run shares, or
+// returns "" when Ryuk is off: only Ryuk reaps a container that outlives the
+// package that started it, so without it each package keeps its own.
+func runScopedName(kind string) string {
+	if !ryukReaps() {
+		return ""
+	}
+	id := testcontainers.SessionID()
+	return "pug-test-" + kind + "-" + id[:min(12, len(id))]
+}
+
+// release ends a package's use of a container. With Ryuk on that is nothing: a
+// run-scoped one may still serve other packages, and Ryuk reaps them all without
+// the seconds a stop costs here. Without Ryuk it is a kill.
+func release(ctr testcontainers.Container) error {
+	if ryukReaps() {
+		return nil
+	}
+	return testcontainers.TerminateContainer(ctr, testcontainers.StopTimeout(0))
 }
 
 // lazyContainer holds a container started on first use and shared by the rest

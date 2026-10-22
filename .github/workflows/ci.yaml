@@ -30,16 +30,15 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      # Its own key so the cache holds the -race build of the dependencies, which
+      # only this job compiles; go.mod in the hash refreshes it on a Go bump.
       - uses: actions/cache@v6
         with:
           path: |
             /home/runner/go/pkg/mod
             /home/runner/.cache/go-build
-          key: go-${{ hashFiles('go.sum') }}
-          restore-keys: go-
-
-      - name: Download modules and compile tools
-        run: go mod download && go install tool
+          key: go-test-${{ hashFiles('go.mod', 'go.sum') }}
+          restore-keys: go-test-
 
       - name: Test
         run: make cover
@@ -68,8 +67,8 @@ jobs:
           path: |
             /home/runner/go/pkg/mod
             /home/runner/.cache/go-build
-          key: go-${{ hashFiles('go.sum') }}
-          restore-keys: go-
+          key: go-tools-${{ hashFiles('go.mod', 'go.sum') }}
+          restore-keys: go-tools-
 
       - name: Download modules and compile tools
         run: go mod download && go install tool
@@ -98,8 +97,8 @@ jobs:
           path: |
             /home/runner/go/pkg/mod
             /home/runner/.cache/go-build
-          key: go-${{ hashFiles('go.sum') }}
-          restore-keys: go-
+          key: go-tools-${{ hashFiles('go.mod', 'go.sum') }}
+          restore-keys: go-tools-
 
       - name: Download modules and compile tools
         run: go mod download && go install tool
@@ -124,8 +123,8 @@ jobs:
           path: |
             /home/runner/go/pkg/mod
             /home/runner/.cache/go-build
-          key: go-${{ hashFiles('go.sum') }}
-          restore-keys: go-
+          key: go-tools-${{ hashFiles('go.mod', 'go.sum') }}
+          restore-keys: go-tools-
 
       - name: Download modules and compile tools
         run: go mod download && go install tool

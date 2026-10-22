@@ -509,7 +509,7 @@ func (f *domainFixture) waitForBlocked(done <-chan error) {
 	f.t.Helper()
 	for start := time.Now(); ; {
 		var waiting bool
-		if err := f.db.PgW.QueryRow(f.ctx, "select exists (select 1 from pg_locks where not granted)").Scan(&waiting); err != nil {
+		if err := f.db.PgW.QueryRow(f.ctx, "select exists (select 1 from pg_locks l join pg_stat_activity a using (pid) where not l.granted and a.datname = current_database())").Scan(&waiting); err != nil {
 			f.t.Fatal(err)
 		}
 		if waiting {

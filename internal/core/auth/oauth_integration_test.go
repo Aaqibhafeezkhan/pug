@@ -101,7 +101,7 @@ func TestCompleteOIDCSignIn_LinksExistingEmailPasswordAccount(t *testing.T) {
 	ctx := context.Background()
 
 	write := dbwrite.New(db.PgW)
-	hash, err := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("bcrypt: %v", err)
 	}

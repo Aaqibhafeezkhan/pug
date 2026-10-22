@@ -42,7 +42,7 @@ var redisDBSeq atomic.Uint64
 
 // SetupRedis starts (or reuses) the package's Redis container and returns a
 // client scoped to a logical database private to this test. Cleanup is
-// registered via t.Cleanup; the container is torn down by Main.
+// registered via t.Cleanup; Main releases the container.
 func SetupRedis(t *testing.T) *TestRedis {
 	t.Helper()
 	// Scoped to the test — see the note in SetupPostgres for why the shared
@@ -114,7 +114,7 @@ func startRedis() (_ *sharedRedis, err error) {
 	}
 
 	teardowns.add(func() error {
-		if err := testcontainers.TerminateContainer(ctr); err != nil {
+		if err := release(ctr); err != nil {
 			return fmt.Errorf("terminate redis container: %w", err)
 		}
 		return nil

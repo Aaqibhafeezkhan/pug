@@ -22,10 +22,14 @@ func seedSession(
 	projectID, distinctID, sessionID string, n int, end time.Time, auto map[string]string,
 ) {
 	t.Helper()
+	rows := make([]testutil.Event, n)
 	for i := range n {
-		testutil.InsertEvent(ctx, t, ch.Conn, uuid.NewString(), projectID, distinctID, "page_view", sessionID,
-			auto, map[string]string{}, end.Add(-time.Duration(n-1-i)*time.Second))
+		rows[i] = testutil.Event{
+			EventID: uuid.NewString(), ProjectID: projectID, DistinctID: distinctID, Kind: "page_view",
+			SessionID: sessionID, Auto: auto, OccurTime: end.Add(-time.Duration(n-1-i) * time.Second),
+		}
 	}
+	testutil.InsertEvents(ctx, t, ch.Conn, rows...)
 }
 
 func sessionIDs(sessions []events.ProfileSession) []string {
