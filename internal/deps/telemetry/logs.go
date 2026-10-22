@@ -2,7 +2,9 @@ package telemetry
 
 import (
 	"context"
+	"log/slog"
 
+	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/sdk/log"
 )
@@ -23,4 +25,10 @@ func newLoggerProvider(ctx context.Context) (*log.LoggerProvider, error) {
 
 	loggerProvider := log.NewLoggerProvider(log.WithProcessor(log.NewBatchProcessor(logExporter)))
 	return loggerProvider, nil
+}
+
+func installOTLPLogHandler(serviceName string, lp *log.LoggerProvider) {
+	slog.SetDefault(slog.New(newCorrelationHandler(
+		otelslog.NewHandler(serviceName, otelslog.WithLoggerProvider(lp), otelslog.WithSource(true)),
+	)))
 }

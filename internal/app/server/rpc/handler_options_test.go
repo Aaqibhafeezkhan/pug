@@ -11,12 +11,14 @@ import (
 	"connectrpc.com/authn"
 	"connectrpc.com/connect"
 	"connectrpc.com/otelconnect"
+	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"google.golang.org/protobuf/proto"
 
 	coreorgs "github.com/pug-sh/pug/internal/core/orgs"
 	"github.com/pug-sh/pug/internal/correlation"
+	"github.com/pug-sh/pug/internal/deps/telemetry"
 	orgsv1 "github.com/pug-sh/pug/internal/gen/proto/dashboard/orgs/v1"
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/orgs/v1/orgsv1connect"
 	profilesv1 "github.com/pug-sh/pug/internal/gen/proto/shared/profiles/v1"
@@ -27,6 +29,7 @@ import (
 type tenantCaptureHandler struct {
 	mu      sync.Mutex
 	tenants []correlation.Tenant
+	levels  []slog.Level
 }
 
 func (h *tenantCaptureHandler) Enabled(context.Context, slog.Level) bool { return true }
@@ -35,6 +38,7 @@ func (h *tenantCaptureHandler) Handle(ctx context.Context, r slog.Record) error 
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		h.tenants = append(h.tenants, correlation.TenantFromContext(ctx))
+		h.levels = append(h.levels, r.Level)
 	}
 	return nil
 }
@@ -45,6 +49,12 @@ func (h *tenantCaptureHandler) got() []correlation.Tenant {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.tenants
+}
+
+func (h *tenantCaptureHandler) gotLevels() []slog.Level {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.levels
 }
 
 // recordChain returns HandlerOptions wired to capture each access log's tenant and
@@ -73,6 +83,16 @@ func serveAs(t *testing.T, principal *Principal, handler http.Handler) *httptest
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// cancelingRoleLookup is a client leaving during the role lookup, whose failed read
+// records the cancel, as GetMemberRole does.
+type cancelingRoleLookup struct{ cancel context.CancelFunc }
+
+func (l *cancelingRoleLookup) GetMemberRole(ctx context.Context, _, _ string) (coreorgs.Role, error) {
+	l.cancel()
+	telemetry.RecordError(ctx, ctx.Err())
+	return "", ctx.Err()
 }
 
 func onlySpanAttrs(t *testing.T, spans *tracetest.InMemoryExporter) map[string]string {
@@ -153,5 +173,43 @@ func TestHandlerOptions_orgRPCNamesOnlyAuthorizedOrg(t *testing.T) {
 				t.Errorf("span project.id = %q, want none", got)
 			}
 		})
+	}
+}
+
+// TestHandlerOptions_canceledRequestIsNotAServerError replays trace
+// c4182c606000f6a01c82e9dd44ff8c97: a cancel during the authz role lookup answered
+// INTERNAL, logged the access line at ERROR and left the server span red.
+func TestHandlerOptions_canceledRequestIsNotAServerError(t *testing.T) {
+	lookup := &cancelingRoleLookup{}
+	opts, logs, spans := recordChain(t, lookup)
+	_, handler := orgsv1connect.NewOrgsServiceHandler(orgsv1connect.UnimplementedOrgsServiceHandler{}, opts)
+	srv := serveAs(t, &Principal{AuthType: AuthTypeJWT, Customer: &dbread.Customer{ID: "cust-1"}},
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithCancel(r.Context())
+			defer cancel()
+			lookup.cancel = cancel
+			handler.ServeHTTP(w, r.WithContext(ctx))
+		}))
+
+	_, err := orgsv1connect.NewOrgsServiceClient(srv.Client(), srv.URL).
+		ListMembers(context.Background(), connect.NewRequest(&orgsv1.ListMembersRequest{OrgId: proto.String("org-9")}))
+	if connect.CodeOf(err) != connect.CodeCanceled {
+		t.Fatalf("code = %v, want Canceled", connect.CodeOf(err))
+	}
+
+	got := spans.GetSpans()
+	if len(got) != 1 {
+		t.Fatalf("recorded %d spans, want the one server span", len(got))
+	}
+	if got[0].Status.Code == codes.Error {
+		t.Errorf("server span status = Error (%q), want not an error", got[0].Status.Description)
+	}
+	for _, e := range got[0].Events {
+		if e.Name == "exception" {
+			t.Errorf("server span has an exception event: %v", e.Attributes)
+		}
+	}
+	if levels := logs.gotLevels(); len(levels) != 1 || levels[0] != slog.LevelWarn {
+		t.Errorf("access log levels = %v, want one WARN", levels)
 	}
 }

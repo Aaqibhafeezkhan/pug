@@ -76,6 +76,8 @@ func (h *billingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// and OTLP rather than on bare stderr.
 	defer func() {
 		if v := recover(); v != nil {
+			// The timeout's cancel below runs first, and a panic is a bug either way.
+			ctx := context.WithoutCancel(ctx)
 			slog.ErrorContext(ctx, "panic serving a billing webhook",
 				slog.Any("panic", v), slog.String("provider", h.verifier.Name()))
 			telemetry.RecordError(ctx, fmt.Errorf("webhook: panic: %v", v))
@@ -99,6 +101,8 @@ func (h *billingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		// This is the detecting layer, and a systematic read failure burns every retry
 		// and then leaves the delivery stranded with no reason recorded anywhere.
+		// net/http cancels the request on a failed read, so detach to keep it an error.
+		ctx := context.WithoutCancel(ctx)
 		slog.ErrorContext(ctx, "failed to read a billing webhook body", slogx.Error(err),
 			slog.String("provider", h.verifier.Name()))
 		telemetry.RecordError(ctx, err)

@@ -31,10 +31,8 @@ func (c failingConn) Query(ctx context.Context, _ string, _ ...any) (driver.Rows
 	return nil, c.err
 }
 
-// otelconnect reads the handler's code: a cancel coded INTERNAL would mark the
-// span an error and count toward the server error rate. The code comes from the
-// request's context, so an error that only wraps a deadline, as a ClickHouse dial
-// timeout does, stays INTERNAL.
+// The code comes from the request's context, so an error that only wraps a
+// deadline, as a ClickHouse dial timeout does, stays INTERNAL.
 func TestReadFailuresKeepTheirCode(t *testing.T) {
 	user := proto.String("u")
 	calls := map[string]func(*server, context.Context) error{

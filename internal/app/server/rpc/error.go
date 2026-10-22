@@ -47,6 +47,12 @@ func sanitizeError(ctx context.Context, procedure string, err error) error {
 		return nil
 	}
 
+	// A done request answers with its context's code, since the cancel or deadline
+	// most likely caused the fault. A code the handler chose for the client stands.
+	if ctx.Err() != nil && isServerFault(err) {
+		err = ConnectCtxErr(ctx.Err())
+	}
+
 	// Handler-tagged error: build the connect error and attach its stable reason.
 	if appErr, ok := errors.AsType[*apperr.Error](err); ok {
 		cerr := connect.NewError(appErr.Code(), errors.New(appErr.Message()))
@@ -66,11 +72,6 @@ func sanitizeError(ctx context.Context, procedure string, err error) error {
 		return connectErr
 	}
 
-	// Let Connect RPC map context errors to the correct codes (no detail).
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-
 	// Non-connect error - log and sanitize.
 	slog.ErrorContext(ctx, "unhandled error",
 		slog.String("procedure", procedure),
@@ -81,6 +82,17 @@ func sanitizeError(ctx context.Context, procedure string, err error) error {
 	cerr := connect.NewError(connect.CodeInternal, errors.New("internal error"))
 	attachDetails(ctx, cerr, apperr.ReasonInternal)
 	return cerr
+}
+
+// isServerFault reports a code the server answers for its own failure. An
+// *apperr.Error carries its code in a field, which connect.CodeOf does not read,
+// and a raw error is Unknown.
+func isServerFault(err error) bool {
+	code := connect.CodeOf(err)
+	if ae, ok := errors.AsType[*apperr.Error](err); ok {
+		code = ae.Code()
+	}
+	return code == connect.CodeUnknown || code == connect.CodeInternal || code == connect.CodeUnavailable
 }
 
 // attachDetails attaches the standard google.rpc error details: an ErrorInfo

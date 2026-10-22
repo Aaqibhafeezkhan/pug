@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"testing"
@@ -189,5 +190,61 @@ func TestCorrelationHandler_keepsCallSiteTenant(t *testing.T) {
 	}
 	if got, ok := attrValue(cap.rec, "org_id"); !ok || got != "org-1" {
 		t.Errorf("org_id = %q (found=%v), want org-1", got, ok)
+	}
+}
+
+func TestCorrelationHandler_downgradesCanceledRequest(t *testing.T) {
+	for _, tc := range cancelCases(t) {
+		t.Run(tc.name, func(t *testing.T) {
+			cap := &capturingHandler{}
+			h := newCorrelationHandler(cap)
+			if err := h.Handle(tc.ctx, slog.NewRecord(time.Time{}, slog.LevelError, "msg", 0)); err != nil {
+				t.Fatalf("Handle: %v", err)
+			}
+			wantLevel := slog.LevelError
+			if tc.canceled {
+				wantLevel = slog.LevelWarn
+			}
+			if cap.rec.Level != wantLevel {
+				t.Errorf("level = %v, want %v", cap.rec.Level, wantLevel)
+			}
+			if got, ok := attrValue(cap.rec, "canceled"); ok != tc.canceled || (ok && got != "true") {
+				t.Errorf("canceled attr = %q (found=%v), want found=%v", got, ok, tc.canceled)
+			}
+			if got, _ := attrValue(cap.rec, "error_id"); tc.canceled && got != "id-req" {
+				t.Errorf("error_id = %q on a downgraded record, want id-req", got)
+			}
+		})
+	}
+}
+
+func TestCorrelationHandler_keepsInfoOnCanceledRequest(t *testing.T) {
+	cap := &capturingHandler{}
+	h := newCorrelationHandler(cap)
+	ctx, cancel := context.WithCancel(correlation.WithID(context.Background(), "id-req"))
+	cancel()
+
+	if err := h.Handle(ctx, slog.NewRecord(time.Time{}, slog.LevelInfo, "msg", 0)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if cap.rec.Level != slog.LevelInfo {
+		t.Errorf("level = %v, want Info", cap.rec.Level)
+	}
+	if _, ok := attrValue(cap.rec, "canceled"); ok {
+		t.Error("canceled attr present on an INFO record")
+	}
+}
+
+func TestCorrelationHandler_dropsDowngradeBelowInnerLevel(t *testing.T) {
+	var buf bytes.Buffer
+	h := newCorrelationHandler(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx, cancel := context.WithCancel(correlation.WithID(context.Background(), "id-req"))
+	cancel()
+
+	if err := h.Handle(ctx, slog.NewRecord(time.Time{}, slog.LevelError, "msg", 0)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("an ERROR-only handler logged the downgraded WARN: %q", buf.String())
 	}
 }

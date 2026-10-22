@@ -993,6 +993,9 @@ func (s *Service) execMutation(ctx context.Context, query string, args ...any) e
 }
 
 func (s *Service) publishErase(ctx context.Context, projectID, requestID, profileID, externalID string) error {
+	// The request row has committed, so enqueue it even if the client left. JetStream
+	// times out the publish itself.
+	ctx = context.WithoutCancel(ctx)
 	msg := &workercompliancev1.EraseMessage{
 		ProjectId:  proto.String(projectID),
 		RequestId:  proto.String(requestID),

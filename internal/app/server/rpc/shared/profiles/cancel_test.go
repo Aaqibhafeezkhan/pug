@@ -50,8 +50,7 @@ func (r failedRows) Next() bool   { return false }
 func (r failedRows) Err() error   { return r.err }
 func (r failedRows) Close() error { return r.err }
 
-// handlerErrs receives what the handler returned, which is what otelconnect,
-// sitting outside it, records as the RPC's status.
+// handlerErrs receives what the handler returned, before ErrorInterceptor maps it.
 type handlerErrs chan error
 
 func (c handlerErrs) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc { return next }

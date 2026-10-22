@@ -67,6 +67,8 @@ func (c *loopbackClient) Do(req *http.Request) (_ *http.Response, err error) {
 	// rather than a dropped connection.
 	defer func() {
 		if r := recover(); r != nil {
+			// The timeout's cancel below runs first, and a panic is a bug either way.
+			ctx := context.WithoutCancel(ctx)
 			// The panic value stays server-side. protoc-gen-go-mcp's runtime.HandleError
 			// prefers the full wrapped chain over the connect.Error's own message, so
 			// whatever is assigned to err here becomes the tool error text the model reads
