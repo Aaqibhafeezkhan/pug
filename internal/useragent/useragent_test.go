@@ -35,13 +35,12 @@ func TestParse(t *testing.T) {
 		want Properties
 	}{
 		{
-			name: "chrome desktop — browser and os, no device",
+			name: "chrome desktop: browser and os, no device, NT 10.0 names no version",
 			ua:   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
 			want: Properties{
 				PropBrowser:        "Google Chrome",
 				PropBrowserVersion: "118",
 				PropOS:             "Windows",
-				PropOSVersion:      "10",
 				PropMobile:         "false",
 			},
 		},
@@ -92,14 +91,150 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
-			name: "chrome os — not folded to Linux",
+			name: "chrome os: not folded to Linux, reduced 14541.0.0 names no version",
 			ua:   "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 			want: Properties{
 				PropBrowser:        "Google Chrome",
 				PropBrowserVersion: "124",
 				PropOS:             "Chrome OS",
-				PropOSVersion:      "14541.0.0",
 				PropMobile:         "false",
+			},
+		},
+		{
+			name: "firefox on macos: capped 10.15 names no version",
+			ua:   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:158.0) Gecko/20100101 Firefox/158.0",
+			want: Properties{
+				PropBrowser:        "Firefox",
+				PropBrowserVersion: "158",
+				PropOS:             "macOS",
+				PropDevice:         "Mac",
+				PropMobile:         "false",
+			},
+		},
+		{
+			name: "safari on macos: frozen 10_15_7 names no version",
+			ua:   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+			want: Properties{
+				PropBrowser:        "Safari",
+				PropBrowserVersion: "26",
+				PropOS:             "macOS",
+				PropDevice:         "Mac",
+				PropMobile:         "false",
+			},
+		},
+		{
+			name: "safari on mojave: below the cap, version kept",
+			ua:   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15",
+			want: Properties{
+				PropBrowser:        "Safari",
+				PropBrowserVersion: "14",
+				PropOS:             "macOS",
+				PropOSVersion:      "10.14.6",
+				PropDevice:         "Mac",
+				PropMobile:         "false",
+			},
+		},
+		{
+			name: "firefox on windows 7: pre-NT-10 version kept",
+			ua:   "Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:115.0) Gecko/20100101 Firefox/115.0",
+			want: Properties{
+				PropBrowser:        "Firefox",
+				PropBrowserVersion: "115",
+				PropOS:             "Windows",
+				PropOSVersion:      "7",
+				PropMobile:         "false",
+			},
+		},
+		{
+			name: "android chrome reduced UA: frozen release and K device dropped",
+			ua:   "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36",
+			want: Properties{
+				PropBrowser:        "Google Chrome",
+				PropBrowserVersion: "141",
+				PropOS:             "Android",
+				PropMobile:         "true",
+			},
+		},
+		{
+			name: "android webview reduced UA: frozen release and placeholder device dropped",
+			ua:   "Mozilla/5.0 (Linux; Android 10; K; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.0.0 Mobile Safari/537.36",
+			want: Properties{
+				PropBrowser:        "Chrome Mobile WebView",
+				PropBrowserVersion: "141",
+				PropOS:             "Android",
+				PropMobile:         "true",
+			},
+		},
+		{
+			name: "firefox on android 10: real release and device kept, only Chromium's K is reduced",
+			ua:   "Mozilla/5.0 (Android 10; Mobile; rv:144.0) Gecko/144.0 Firefox/144.0",
+			want: Properties{
+				PropBrowser:        "Firefox Mobile",
+				PropBrowserVersion: "144",
+				PropOS:             "Android",
+				PropOSVersion:      "10",
+				PropDevice:         "Generic Smartphone",
+				PropMobile:         "true",
+			},
+		},
+		{
+			name: "ios safari 26: frozen 18.x replaced by Safari's version",
+			ua:   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Mobile/15E148 Safari/604.1",
+			want: Properties{
+				PropBrowser:        "Safari",
+				PropBrowserVersion: "26",
+				PropOS:             "iOS",
+				PropOSVersion:      "26.2",
+				PropDevice:         "iPhone",
+				PropMobile:         "true",
+			},
+		},
+		{
+			name: "ios safari 18: os token kept below Safari 26, patch included",
+			ua:   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1",
+			want: Properties{
+				PropBrowser:        "Safari",
+				PropBrowserVersion: "18",
+				PropOS:             "iOS",
+				PropOSVersion:      "18.6.2",
+				PropDevice:         "iPhone",
+				PropMobile:         "true",
+			},
+		},
+		{
+			name: "chrome on ios: no Safari version token, os token kept",
+			ua:   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126.0.6478.54 Mobile/15E148 Safari/604.1",
+			want: Properties{
+				PropBrowser:        "Chrome Mobile iOS",
+				PropBrowserVersion: "126",
+				PropOS:             "iOS",
+				PropOSVersion:      "17.5",
+				PropDevice:         "iPhone",
+				PropMobile:         "true",
+			},
+		},
+		{
+			name: "ios app webview: an app's AppVersion token is not Safari's version",
+			ua:   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MyApp/5.2 AppVersion/2025.40",
+			want: Properties{
+				PropBrowser:        "Mobile Safari UI/WKWebView",
+				PropBrowserVersion: "2025",
+				PropOS:             "iOS",
+				PropOSVersion:      "17.5",
+				PropDevice:         "iPhone",
+				PropMobile:         "true",
+			},
+		},
+		{
+			name: "ios app webview: a Version/ token without Safari's is not Safari's version",
+			ua:   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MyApp/5.2 Version/26.3",
+			want: Properties{
+				PropBrowser:        "Mobile Safari UI/WKWebView",
+				PropBrowserVersion: "26",
+				PropOS:             "iOS",
+				PropOSVersion:      "17.5",
+				PropDevice:         "iPhone",
+				PropMobile:         "true",
 			},
 		},
 		{
