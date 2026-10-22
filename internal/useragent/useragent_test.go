@@ -226,6 +226,18 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
+			name: "ios app webview: a Version/ token without Safari's is not Safari's version",
+			ua:   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MyApp/5.2 Version/26.3",
+			want: Properties{
+				PropBrowser:        "Mobile Safari UI/WKWebView",
+				PropBrowserVersion: "26",
+				PropOS:             "iOS",
+				PropOSVersion:      "17.5",
+				PropDevice:         "iPhone",
+				PropMobile:         "true",
+			},
+		},
+		{
 			name: "googlebot — browser and device (Spider)",
 			ua:   "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
 			want: Properties{

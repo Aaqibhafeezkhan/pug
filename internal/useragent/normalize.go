@@ -30,7 +30,7 @@ var frozenOSVersions = map[string]map[string]bool{
 }
 
 // Safari 26 froze the iOS token at 18.x, but on iOS, Safari's own version still names the release.
-var iosSafariVersion = regexp.MustCompile(`\sVersion/((\d+)(?:\.\d+)*)`)
+var iosSafariVersion = regexp.MustCompile(`\sVersion/((\d+)(?:\.\d+)*).*\sSafari/`)
 
 // linuxFamilies are ua-parser OS families that navigator.userAgentData collapses to
 // "Linux". Chrome OS is intentionally excluded — the SDK reports it as its own platform.
