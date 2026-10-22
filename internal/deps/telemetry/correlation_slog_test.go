@@ -131,3 +131,63 @@ func TestCorrelationHandler_stampsAfterWithAttrs(t *testing.T) {
 		t.Errorf("error_id after WithAttrs = %q (found=%v), want id-attrs", got, ok)
 	}
 }
+
+func TestCorrelationHandler_stampsTenant(t *testing.T) {
+	cap := &capturingHandler{}
+	h := newCorrelationHandler(cap)
+	ctx := correlation.WithTenant(context.Background())
+	correlation.SetTenant(ctx, correlation.Tenant{OrgID: "org-1", ProjectID: "proj-1"})
+
+	rec := slog.NewRecord(time.Time{}, slog.LevelInfo, "msg", 0)
+	if err := h.Handle(ctx, rec); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got, ok := attrValue(cap.rec, "org_id"); !ok || got != "org-1" {
+		t.Errorf("org_id = %q (found=%v), want org-1", got, ok)
+	}
+	if got, ok := attrValue(cap.rec, "project_id"); !ok || got != "proj-1" {
+		t.Errorf("project_id = %q (found=%v), want proj-1", got, ok)
+	}
+}
+
+func TestCorrelationHandler_unsetTenantNoAttrs(t *testing.T) {
+	cap := &capturingHandler{}
+	h := newCorrelationHandler(cap)
+	ctx := correlation.WithTenant(context.Background())
+
+	rec := slog.NewRecord(time.Time{}, slog.LevelInfo, "msg", 0)
+	if err := h.Handle(ctx, rec); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	for _, key := range []string{"org_id", "project_id"} {
+		if _, ok := attrValue(cap.rec, key); ok {
+			t.Errorf("%s attr present but no tenant was set", key)
+		}
+	}
+}
+
+func TestCorrelationHandler_keepsCallSiteTenant(t *testing.T) {
+	cap := &capturingHandler{}
+	h := newCorrelationHandler(cap)
+	ctx := correlation.WithTenant(context.Background())
+	correlation.SetTenant(ctx, correlation.Tenant{OrgID: "org-1", ProjectID: "proj-1"})
+
+	rec := slog.NewRecord(time.Time{}, slog.LevelInfo, "msg", 0)
+	rec.AddAttrs(slog.String("project_id", "proj-other"))
+	if err := h.Handle(ctx, rec); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	var projects []string
+	cap.rec.Attrs(func(a slog.Attr) bool {
+		if a.Key == "project_id" {
+			projects = append(projects, a.Value.String())
+		}
+		return true
+	})
+	if len(projects) != 1 || projects[0] != "proj-other" {
+		t.Errorf("project_id attrs = %v, want only the call site's proj-other", projects)
+	}
+	if got, ok := attrValue(cap.rec, "org_id"); !ok || got != "org-1" {
+		t.Errorf("org_id = %q (found=%v), want org-1", got, ok)
+	}
+}

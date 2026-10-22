@@ -13,6 +13,7 @@ import (
 	"github.com/pug-sh/pug/internal/apperr"
 	coredashboards "github.com/pug-sh/pug/internal/core/dashboards"
 	coreinsights "github.com/pug-sh/pug/internal/core/insights"
+	"github.com/pug-sh/pug/internal/correlation"
 	commonv1 "github.com/pug-sh/pug/internal/gen/proto/common/v1"
 	publicdashboardsv1 "github.com/pug-sh/pug/internal/gen/proto/public/dashboards/v1"
 	insightsv1 "github.com/pug-sh/pug/internal/gen/proto/shared/insights/v1"
@@ -28,7 +29,7 @@ func TestQuery_ResolvesEnabledShareToken(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 	srv, svc, projectID := newPublicIntegrationServer(t)
-	ctx := context.Background()
+	ctx := correlation.WithTenant(context.Background())
 	_, token := seedSharedMarkdownDashboard(t, ctx, svc, projectID)
 
 	if len(token) != 64 {
@@ -50,6 +51,9 @@ func TestQuery_ResolvesEnabledShareToken(t *testing.T) {
 	}
 	if got := tiles[0].GetTile().GetMarkdown().GetBody(); got != "# Hello" {
 		t.Errorf("markdown body = %q, want %q", got, "# Hello")
+	}
+	if got := correlation.TenantFromContext(ctx); got != (correlation.Tenant{ProjectID: projectID}) {
+		t.Errorf("tenant = %+v, want project %s alone", got, projectID)
 	}
 }
 

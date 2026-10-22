@@ -335,6 +335,7 @@ func (s *server) Leave(
 		}
 		return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
 	}
+	telemetry.SetTenant(ctx, req.Msg.GetOrgId(), "")
 
 	return connect.NewResponse(&orgsv1.LeaveResponse{}), nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/pug-sh/pug/internal/correlation"
 	"github.com/pug-sh/pug/internal/deps/telemetry"
 	"github.com/pug-sh/pug/internal/slogx"
 )
@@ -162,7 +163,7 @@ func (r *Resolver) reportCorruptState(ctx context.Context, key, val string) {
 		return
 	}
 	err := fmt.Errorf("cookieless: unparseable session state at %s (%d bytes)", key, len(val))
-	slog.ErrorContext(ctx, "cookieless session state is corrupt, minting a replacement",
+	slog.ErrorContext(correlation.WithoutTenant(ctx), "cookieless session state is corrupt, minting a replacement",
 		slogx.Error(err), slog.String("reason", string(DegradeCorruptState)))
 	telemetry.RecordError(ctx, err)
 }
@@ -175,7 +176,7 @@ func (r *Resolver) reportCorruptState(ctx context.Context, key, val string) {
 // the one thing that distinguishes a permanent deployment fault from a blip.
 func (r *Resolver) degrade(ctx context.Context, reason DegradeReason, err error, distinctID string, day Day) (string, DegradeReason) {
 	if r.shouldReportDegrade(reason) {
-		slog.ErrorContext(ctx, "cookieless session state unavailable, falling back to the visitor-day session",
+		slog.ErrorContext(correlation.WithoutTenant(ctx), "cookieless session state unavailable, falling back to the visitor-day session",
 			slogx.Error(err), slog.String("reason", string(reason)))
 		telemetry.RecordError(ctx, err)
 	}
@@ -248,7 +249,7 @@ func (r *Resolver) slideSession(ctx context.Context, key, sid string, last, occu
 		// Throttled for the same reason as degrade(): a read-only replica or an
 		// OOM refuses every write, so this fires on every event of every visitor.
 		if r.shouldReportDegrade(DegradeSlideFailed) {
-			slog.ErrorContext(ctx, "cookieless session watermark could not advance",
+			slog.ErrorContext(correlation.WithoutTenant(ctx), "cookieless session watermark could not advance",
 				slogx.Error(err), slog.String("reason", string(DegradeSlideFailed)))
 			telemetry.RecordError(ctx, err)
 		}

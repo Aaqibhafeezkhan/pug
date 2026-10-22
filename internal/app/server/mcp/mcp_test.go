@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -12,7 +13,7 @@ import (
 
 	"connectrpc.com/authn"
 	"connectrpc.com/connect"
-	"connectrpc.com/validate"
+	"connectrpc.com/otelconnect"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -176,23 +177,16 @@ func newTestServer(t *testing.T) testDeps {
 		t.Fatalf("authz.NewAuthorizer: %v", err)
 	}
 
-	// The real interceptor sandwich (minus otel, which needs SDK setup and does
-	// not affect these assertions). validate proves protovalidate runs on the
-	// loopback path; authz proves the API-key no-op path; principal proves the
-	// handler sees an authenticated Principal; WithRecover mirrors production so
-	// TestE2E_HandlerPanicSurfacesAsToolError exercises the real panic containment
-	// rather than a harness-only approximation.
-	handlerOpts := connect.WithHandlerOptions(
-		connect.WithInterceptors(
-			pogrpc.CorrelationInterceptor(),
-			pogrpc.LoggingInterceptor(),
-			pogrpc.ErrorInterceptor(),
-			validate.NewInterceptor(validate.WithoutErrorDetails()),
-			pogrpc.PrincipalInterceptor(),
-			pogrpc.AuthzInterceptor(authorizer, stubRoleLookup{}),
-		),
-		connect.WithRecover(pogrpc.RecoverHandlerPanic),
-	)
+	// The production handler options, with otel on the global no-op provider.
+	// validate proves protovalidate runs on the loopback path; authz proves the
+	// API-key no-op path; principal proves the handler sees an authenticated
+	// Principal; WithRecover lets TestE2E_HandlerPanicSurfacesAsToolError exercise
+	// the real panic containment rather than a harness-only approximation.
+	otelInterceptor, err := otelconnect.NewInterceptor()
+	if err != nil {
+		t.Fatalf("otelconnect.NewInterceptor: %v", err)
+	}
+	handlerOpts := pogrpc.HandlerOptions(otelInterceptor, authorizer, stubRoleLookup{})
 
 	mux := http.NewServeMux()
 	// The shared services keep dual auth (private key OR dashboard JWT), exactly as
@@ -421,6 +415,45 @@ func TestLoopbackRecoversPanicOutsideConnect(t *testing.T) {
 	// model's "internal error" back to the log line holding the panic value and stack.
 	if !strings.Contains(doErr.Error(), "test-correlation-id") {
 		t.Errorf("error = %q, want it to carry the correlation id", doErr.Error())
+	}
+}
+
+type tenantCaptureHandler struct{ tenants []correlation.Tenant }
+
+func (h *tenantCaptureHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *tenantCaptureHandler) Handle(ctx context.Context, r slog.Record) error {
+	if r.Message == "recovered panic in mcp loopback handler" {
+		h.tenants = append(h.tenants, correlation.TenantFromContext(ctx))
+	}
+	return nil
+}
+func (h *tenantCaptureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *tenantCaptureHandler) WithGroup(string) slog.Handler      { return h }
+
+func TestLoopbackPanicLogNamesTenant(t *testing.T) {
+	logs := &tenantCaptureHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(logs))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	lb := &loopbackClient{handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("boom outside the connect chain")
+	})}
+	ctx := authn.SetInfo(withAPIKey(context.Background(), testPrivateKey), &pogrpc.Principal{
+		AuthType: pogrpc.AuthTypePrivateKey,
+		Project:  &dbread.Project{ID: "proj-1", OrgID: "org-1"},
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loopbackBaseURL+"/shared.x/Y", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	if _, err := lb.Do(req); err == nil {
+		t.Fatal("Do returned nil error after a handler panic")
+	}
+	want := correlation.Tenant{OrgID: "org-1", ProjectID: "proj-1"}
+	if len(logs.tenants) != 1 || logs.tenants[0] != want {
+		t.Errorf("panic log tenants = %+v, want one with %+v", logs.tenants, want)
 	}
 }
 

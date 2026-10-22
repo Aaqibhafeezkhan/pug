@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"connectrpc.com/authn"
-	"connectrpc.com/connect"
+	"github.com/pug-sh/pug/internal/correlation"
+	"github.com/pug-sh/pug/internal/gen/proto/dashboard/orgs/v1/orgsv1connect"
+	"github.com/pug-sh/pug/internal/gen/proto/shared/profiles/v1/profilesv1connect"
 	"github.com/pug-sh/pug/internal/gen/repo/dbread"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -43,8 +45,9 @@ func spanAttrs(span tracetest.SpanStub) map[string]string {
 	return m
 }
 
-// callInterceptor invokes PrincipalInterceptor with the given principal in context.
-func callInterceptor(t *testing.T, principal *Principal) tracetest.SpanStub {
+// enrichedSpan runs PrincipalInterceptor's enrichment for a project-scoped RPC
+// with the given principal in context.
+func enrichedSpan(t *testing.T, principal *Principal) tracetest.SpanStub {
 	t.Helper()
 
 	exporter := tracetest.NewInMemoryExporter()
@@ -55,17 +58,12 @@ func callInterceptor(t *testing.T, principal *Principal) tracetest.SpanStub {
 		}
 	}()
 
-	interceptor := PrincipalInterceptor()
-	inner := interceptor.WrapUnary(func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-		return nil, nil
-	})
-
 	ctx, span := tp.Tracer("test").Start(context.Background(), "test-span")
 	if principal != nil {
 		ctx = authn.SetInfo(ctx, principal)
 	}
 
-	_, _ = inner(ctx, nil)
+	enrichSpanWithPrincipal(ctx, profilesv1connect.ProfilesServiceGetProcedure)
 	span.End()
 
 	spans := exporter.GetSpans()
@@ -76,7 +74,7 @@ func callInterceptor(t *testing.T, principal *Principal) tracetest.SpanStub {
 }
 
 func TestPrincipalInterceptor_NoAuth(t *testing.T) {
-	span := callInterceptor(t, nil)
+	span := enrichedSpan(t, nil)
 	attrs := spanAttrs(span)
 	if _, ok := attrs["auth.type"]; ok {
 		t.Error("expected no auth.type attribute on unauthenticated request")
@@ -90,7 +88,7 @@ func TestPrincipalInterceptor_JWTAuth(t *testing.T) {
 		Project:  &dbread.Project{ID: "proj-1", OrgID: "org-1"},
 		JWTID:    "jti-abc123",
 	}
-	span := callInterceptor(t, principal)
+	span := enrichedSpan(t, principal)
 	attrs := spanAttrs(span)
 
 	if got := attrs["auth.type"]; got != "jwt" {
@@ -119,7 +117,7 @@ func TestPrincipalInterceptor_APIKeyAuth(t *testing.T) {
 		Project:      &dbread.Project{ID: "proj-2", OrgID: "org-2"},
 		MaskedAPIKey: "...d456",
 	}
-	span := callInterceptor(t, principal)
+	span := enrichedSpan(t, principal)
 	attrs := spanAttrs(span)
 
 	if got := attrs["auth.type"]; got != "priv_key" {
@@ -148,7 +146,7 @@ func TestPrincipalInterceptor_JWTWithoutProject(t *testing.T) {
 		Customer: &dbread.Customer{ID: "cust-1"},
 		JWTID:    "jti-xyz",
 	}
-	span := callInterceptor(t, principal)
+	span := enrichedSpan(t, principal)
 	attrs := spanAttrs(span)
 
 	if got := attrs["auth.type"]; got != "jwt" {
@@ -162,5 +160,31 @@ func TestPrincipalInterceptor_JWTWithoutProject(t *testing.T) {
 	}
 	if _, ok := attrs["org.id"]; ok {
 		t.Error("expected no org.id when Project is nil")
+	}
+}
+
+func TestPrincipalInterceptor_SetsTenant(t *testing.T) {
+	projectTenant := correlation.Tenant{OrgID: "org-1", ProjectID: "proj-1"}
+	tests := []struct {
+		name      string
+		ctx       context.Context
+		procedure string
+		want      correlation.Tenant
+	}{
+		{name: "api key", ctx: apiKeyCtx(), procedure: profilesv1connect.ProfilesServiceGetProcedure, want: projectTenant},
+		{name: "jwt with project", ctx: jwtProjectCtx(), procedure: profilesv1connect.ProfilesServiceGetProcedure, want: projectTenant},
+		{name: "jwt with project on an org-scoped RPC", ctx: jwtProjectCtx(), procedure: orgsv1connect.OrgsServiceListMembersProcedure},
+		{name: "jwt with project on a self-service RPC", ctx: jwtProjectCtx(), procedure: orgsv1connect.OrgsServiceLeaveProcedure},
+		{name: "jwt without project", ctx: customerCtx(), procedure: profilesv1connect.ProfilesServiceGetProcedure},
+		{name: "no principal", ctx: context.Background(), procedure: profilesv1connect.ProfilesServiceGetProcedure},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := correlation.WithTenant(tt.ctx)
+			enrichSpanWithPrincipal(ctx, tt.procedure)
+			if got := correlation.TenantFromContext(ctx); got != tt.want {
+				t.Errorf("tenant = %+v, want %+v", got, tt.want)
+			}
+		})
 	}
 }

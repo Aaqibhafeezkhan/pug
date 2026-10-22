@@ -33,13 +33,15 @@ func ensureCorrelationID(ctx context.Context) context.Context {
 // one is not already present. Register it FIRST so every downstream log line and
 // error detail share the same id; when WithCorrelationID already set one (the
 // normal path), this reuses it. Independent of OpenTelemetry, so the id always exists.
+// It also gives the request an empty tenant, which inner layers fill in with
+// telemetry.SetTenant once they know it.
 func CorrelationInterceptor() connect.Interceptor { return &correlationInterceptor{} }
 
 type correlationInterceptor struct{}
 
 func (i *correlationInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-		return next(ensureCorrelationID(ctx), req)
+		return next(correlation.WithTenant(ensureCorrelationID(ctx)), req)
 	}
 }
 
@@ -49,6 +51,6 @@ func (i *correlationInterceptor) WrapStreamingClient(next connect.StreamingClien
 
 func (i *correlationInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
-		return next(ensureCorrelationID(ctx), conn)
+		return next(correlation.WithTenant(ensureCorrelationID(ctx)), conn)
 	}
 }

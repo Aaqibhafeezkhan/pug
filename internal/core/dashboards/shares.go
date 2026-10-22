@@ -116,6 +116,7 @@ func (s *Service) GetSharedDashboard(ctx context.Context, shareToken string) (Da
 		}
 		return DashboardWithTiles{}, recordServiceError(ctx, "failed to get dashboard share by token", err)
 	}
+	telemetry.SetTenant(ctx, "", share.ProjectID)
 
 	dashboard, err := s.read.GetDashboardByIDAndProjectID(ctx, dbread.GetDashboardByIDAndProjectIDParams{
 		ID:        share.DashboardID,

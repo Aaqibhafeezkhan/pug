@@ -49,12 +49,17 @@ type loopbackClient struct {
 // Do implements connect.HTTPClient.
 func (c *loopbackClient) Do(req *http.Request) (_ *http.Response, err error) {
 	ctx := req.Context()
+	// The tenant holder lives inside the Connect chain, so this layer's own logs need one.
+	if p, perr := rpc.MustGetPrincipalWithProject(ctx); perr == nil {
+		ctx = correlation.WithTenant(ctx)
+		telemetry.SetTenant(ctx, p.Project.OrgID, p.Project.ID)
+	}
 
 	// A panic escaping the in-process handler would be fatal. On the network path
 	// net/http recovers handler panics per connection, but a tool call runs the
 	// handler on a go-sdk jsonrpc2 goroutine that recover never reaches, so the panic
 	// would kill the process — a multi-tenant outage any private-key holder could
-	// trigger. rpc.RecoverHandlerPanic (wired via connect.WithRecover in server.start)
+	// trigger. rpc.RecoverHandlerPanic (wired via connect.WithRecover in rpc.HandlerOptions)
 	// is the first line of defence and contains panics inside the Connect chain with a
 	// proper code and telemetry; this is the backstop for everything outside it — the
 	// authn middleware, mux routing, and the http.ErrAbortHandler panics connect
