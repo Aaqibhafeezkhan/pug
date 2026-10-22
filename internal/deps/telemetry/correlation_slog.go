@@ -16,7 +16,8 @@ const (
 // correlationHandler stamps the per-request correlation id (and the trace id
 // when a span is active) onto every log record, so all logs for a request
 // correlate with the error_id returned to the client. It also stamps the
-// request's tenant once known. No-ops when none is set.
+// request's tenant once known. No-ops when none is set. An ERROR on a canceled
+// request becomes a WARN marked canceled=true.
 type correlationHandler struct{ inner slog.Handler }
 
 func newCorrelationHandler(inner slog.Handler) slog.Handler {
@@ -28,6 +29,14 @@ func (h *correlationHandler) Enabled(ctx context.Context, l slog.Level) bool {
 }
 
 func (h *correlationHandler) Handle(ctx context.Context, r slog.Record) error {
+	if r.Level >= slog.LevelError && canceledRequest(ctx) {
+		// The logger checked Enabled at ERROR, so ask again at WARN.
+		if !h.inner.Enabled(ctx, slog.LevelWarn) {
+			return nil
+		}
+		r.Level = slog.LevelWarn
+		r.AddAttrs(slog.Bool("canceled", true))
+	}
 	// error_id mirrors the key returned in API error responses, so a user-reported
 	// id cross-references directly to these logs. trace_id is stamped as a record
 	// attr because in stdout mode (no OTLP endpoint configured) the inner handler is

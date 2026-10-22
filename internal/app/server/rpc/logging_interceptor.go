@@ -76,15 +76,14 @@ func isClientError(err error) bool {
 	// since the request outran its budget. A raw context error reports
 	// connect.CodeOf == CodeUnknown (Connect only decodes its own *connect.Error),
 	// so match a cancel explicitly before the code switch; errors.Is also catches a
-	// wrapped one. sanitizeError returns the bare context error, so this check is
-	// what keeps cancellations out of ERROR logs.
+	// wrapped one. sanitizeError never returns a raw one, so this only catches a
+	// connect error that wraps a cancel.
 	if errors.Is(err, context.Canceled) {
 		return true
 	}
 	code := connect.CodeOf(err)
 	// A raw *apperr.Error (not yet rewritten by ErrorInterceptor) carries its code
-	// in a field, so connect.CodeOf returns Unknown for it. Read the code directly
-	// so classification is correct regardless of interceptor ordering.
+	// in a field, so connect.CodeOf returns Unknown for it. Read the code directly.
 	if ae, ok := errors.AsType[*apperr.Error](err); ok {
 		code = ae.Code()
 	}

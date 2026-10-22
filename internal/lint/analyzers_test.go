@@ -617,6 +617,197 @@ func TestExhaustiveIgnore(t *testing.T) {
 	assertDiagnostics(t, got, want)
 }
 
+const fixturePanicCtx = `package fixtures
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net/http"
+
+	"connectrpc.com/connect"
+
+	"github.com/pug-sh/pug/internal/deps/telemetry"
+	"github.com/pug-sh/pug/internal/slogx"
+)
+
+func detached(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			ctx := context.WithoutCancel(ctx)
+			slog.ErrorContext(ctx, "panic", slog.Any("panic", r))
+			telemetry.RecordError(ctx, fmt.Errorf("panic: %v", r))
+		}
+	}()
+}
+
+func detachedInline(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			telemetry.RecordError(context.WithoutCancel(ctx), fmt.Errorf("panic: %v", r))
+		}
+	}()
+}
+
+func attached(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.ErrorContext(ctx, "panic", slog.Any("panic", r))
+			telemetry.RecordError(ctx, fmt.Errorf("panic: %v", r))
+		}
+	}()
+}
+
+func warnIsNotDowngraded(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.WarnContext(ctx, "recovered", slog.Any("panic", r))
+		}
+	}()
+}
+
+// Only the function that recovers is held to it.
+func callerOfARecover(ctx context.Context, err error) {
+	defer func() { _ = recover() }()
+	telemetry.RecordError(ctx, err)
+	slog.ErrorContext(ctx, "failed", slogx.Error(err))
+}
+
+func recoverPanic(ctx context.Context) {
+	if r := recover(); r != nil {
+		telemetry.RecordError(ctx, fmt.Errorf("panic: %v", r))
+	}
+}
+
+func hook(ctx context.Context, _ connect.Spec, _ http.Header, p any) error {
+	err := fmt.Errorf("panic: %v", p)
+	telemetry.RecordError(ctx, err)
+	return err
+}
+
+func hookDetachedTooLate(ctx context.Context, _ connect.Spec, _ http.Header, p any) error {
+	err := fmt.Errorf("panic: %v", p)
+	slog.ErrorContext(ctx, "panic", slogx.Error(err))
+	ctx = context.WithoutCancel(ctx)
+	telemetry.RecordError(ctx, err)
+	return err
+}
+
+func options() []connect.HandlerOption {
+	return []connect.HandlerOption{
+		connect.WithRecover(hook),
+		connect.WithRecover(hookDetachedTooLate),
+		connect.WithRecover(func(ctx context.Context, _ connect.Spec, _ http.Header, p any) error {
+			err := fmt.Errorf("panic: %v", p)
+			telemetry.RecordError(ctx, err)
+			return err
+		}),
+	}
+}
+
+func exempted(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			telemetry.RecordError(ctx, fmt.Errorf("panic: %v", r)) // puglint:exempt
+		}
+	}()
+}
+`
+
+func TestPanicCtx(t *testing.T) {
+	got := analyzeFixture(t, lint.PanicCtx, "internal/lint/fixtures", fixturePanicCtx)
+	want := []string{
+		"36: attached reports a panic under a context that can be canceled; detach it with context.WithoutCancel",
+		"37: attached reports a panic under a context that can be canceled; detach it with context.WithoutCancel",
+		"59: recoverPanic reports a panic under a context that can be canceled; detach it with context.WithoutCancel",
+		// connect.WithRecover's hooks handle a panic without calling recover, and a
+		// detach covers only what follows it.
+		"65: hook reports a panic under a context that can be canceled; detach it with context.WithoutCancel",
+		"71: hookDetachedTooLate reports a panic under a context that can be canceled; detach it with context.WithoutCancel",
+		"83: options reports a panic under a context that can be canceled; detach it with context.WithoutCancel",
+	}
+	assertDiagnostics(t, got, want)
+}
+
+const fixtureGroupCtx = `package fixtures
+
+import (
+	"context"
+	"log/slog"
+
+	"golang.org/x/sync/errgroup"
+
+	"github.com/pug-sh/pug/internal/deps/telemetry"
+	"github.com/pug-sh/pug/internal/slogx"
+)
+
+func work(context.Context) error { return nil }
+
+func logsUnderTheParent(ctx context.Context) error {
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return work(gctx) })
+	if err := g.Wait(); err != nil {
+		telemetry.RecordError(ctx, err)
+		slog.ErrorContext(ctx, "group failed", slogx.Error(err))
+		return err
+	}
+	return work(ctx)
+}
+
+func logsUnderTheGroup(ctx context.Context) error {
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return work(gctx) })
+	if err := g.Wait(); err != nil {
+		telemetry.RecordError(gctx, err)
+		slog.ErrorContext(gctx, "group failed", slogx.Error(err))
+		return err
+	}
+	return work(gctx)
+}
+
+// Shadowing the parent is the common spelling, so ctx after Wait is the group's.
+func shadowsTheParent(ctx context.Context) error {
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return work(ctx) })
+	_ = g.Wait()
+	return work(ctx)
+}
+
+func returnsWait(ctx context.Context) error {
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return work(ctx) })
+	return g.Wait()
+}
+
+// Another group's Wait does not cancel this group's context.
+func waitsOnAnotherGroup(ctx context.Context) error {
+	first, firstCtx := errgroup.WithContext(ctx)
+	second, secondCtx := errgroup.WithContext(ctx)
+	second.Go(func() error { return work(secondCtx) })
+	_ = second.Wait()
+	first.Go(func() error { return work(firstCtx) })
+	return first.Wait()
+}
+
+func exempted(ctx context.Context) error {
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return work(gctx) })
+	_ = g.Wait()
+	return work(gctx) // puglint:exempt
+}
+`
+
+func TestGroupCtx(t *testing.T) {
+	got := analyzeFixture(t, lint.GroupCtx, "internal/lint/fixtures", fixtureGroupCtx)
+	want := []string{
+		"30: gctx is canceled once g.Wait returns; use the parent context",
+		"31: gctx is canceled once g.Wait returns; use the parent context",
+		"34: gctx is canceled once g.Wait returns; use the parent context",
+		"42: ctx is canceled once g.Wait returns; use the parent context",
+	}
+	assertDiagnostics(t, got, want)
+}
+
 // Driven by lint.Analyzers() rather than a hand-written list, so an analyzer
 // added to the registry is enforced without touching this test.
 func TestAnalyzersAcrossRepo(t *testing.T) {

@@ -11,7 +11,6 @@ import (
 
 	"connectrpc.com/otelconnect"
 	"github.com/pug-sh/pug/internal/slogx"
-	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -104,9 +103,7 @@ func doSetupSDK(ctx context.Context) (func(context.Context) error, error) {
 	if serviceName == "" {
 		slog.WarnContext(ctx, "OTEL_SERVICE_NAME is not set; traces, metrics, and logs will lack a service name identifier")
 	}
-	slog.SetDefault(slog.New(newCorrelationHandler(
-		otelslog.NewHandler(serviceName, otelslog.WithLoggerProvider(loggerProvider), otelslog.WithSource(true)),
-	)))
+	installOTLPLogHandler(serviceName, loggerProvider)
 	slog.InfoContext(ctx, "OTLP endpoint configured; exporting telemetry via OTLP")
 
 	success = true

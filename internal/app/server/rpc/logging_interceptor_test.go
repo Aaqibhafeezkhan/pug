@@ -118,8 +118,8 @@ func TestIsClientError_apperr(t *testing.T) {
 
 // A client-driven cancel must classify as a client error (WARN). connect.CodeOf
 // returns Unknown for a raw context error, so isClientError matches it via
-// errors.Is, including a wrapped one, which is what sanitizeError's ctx.Err()
-// branch can surface. A deadline is a server error: the request outran its budget.
+// errors.Is, including a wrapped one. A deadline is a server error: the request
+// outran its budget.
 func TestIsClientError_contextErrors(t *testing.T) {
 	for _, err := range []error{
 		context.Canceled,

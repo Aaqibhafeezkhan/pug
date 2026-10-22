@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	protovalidate "buf.build/go/protovalidate"
 	"connectrpc.com/connect"
 	"github.com/pug-sh/pug/internal/apperr"
+	"github.com/pug-sh/pug/internal/correlation"
 	insightsv1 "github.com/pug-sh/pug/internal/gen/proto/shared/insights/v1"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -273,17 +275,76 @@ func TestErrorInterceptor_attachesDetailsToShortCircuitedError(t *testing.T) {
 	}
 }
 
-func TestSanitizeError_ctxCancelNoDetail(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+// A server fault on a done request answers with the context's code, carrying an
+// error_id like any failure. A code the handler chose for the client stands.
+func TestSanitizeError_doneRequest(t *testing.T) {
+	request := correlation.WithID(context.Background(), "id-done")
+	canceled, cancel := context.WithCancel(request)
 	cancel()
-	// A raw (non-connect) error arriving with a cancelled context returns the
-	// bare context error and attaches no detail (the ctx.Err() safety-net branch).
-	err := sanitizeError(ctx, "/test.v1.Svc/Method", errors.New("boom"))
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("want context.Canceled, got %v", err)
+	expired, cancelExpired := context.WithDeadline(request, time.Now())
+	defer cancelExpired()
+
+	tests := []struct {
+		name       string
+		ctx        context.Context
+		err        error
+		wantCode   connect.Code
+		wantReason apperr.Reason
+	}{
+		{
+			name: "raw error on a cancel", ctx: canceled,
+			err:      errors.New("pool acquire failed"),
+			wantCode: connect.CodeCanceled, wantReason: apperr.ReasonCanceled,
+		},
+		{
+			name: "internal on a cancel", ctx: canceled,
+			err:      connect.NewError(connect.CodeInternal, errors.New("internal error")),
+			wantCode: connect.CodeCanceled, wantReason: apperr.ReasonCanceled,
+		},
+		{
+			name: "apperr unavailable on a cancel", ctx: canceled,
+			err:      apperr.Unavailable(apperr.ReasonTurnstileUnavailable, "unavailable"),
+			wantCode: connect.CodeCanceled, wantReason: apperr.ReasonCanceled,
+		},
+		{
+			name: "raw context error on a cancel", ctx: canceled,
+			err:      context.Canceled,
+			wantCode: connect.CodeCanceled, wantReason: apperr.ReasonCanceled,
+		},
+		{
+			name: "internal past a deadline", ctx: expired,
+			err:      connect.NewError(connect.CodeInternal, errors.New("internal error")),
+			wantCode: connect.CodeDeadlineExceeded, wantReason: apperr.ReasonDeadlineExceeded,
+		},
+		{
+			name: "apperr not found on a cancel", ctx: canceled,
+			err:      apperr.NotFound(apperr.ReasonProfileNotFound, "profile not found"),
+			wantCode: connect.CodeNotFound, wantReason: apperr.ReasonProfileNotFound,
+		},
+		{
+			name: "invalid argument on a cancel", ctx: canceled,
+			err:      connect.NewError(connect.CodeInvalidArgument, errors.New("bad")),
+			wantCode: connect.CodeInvalidArgument, wantReason: apperr.ReasonInvalidArgument,
+		},
+		{
+			name: "internal on a live request", ctx: request,
+			err:      connect.NewError(connect.CodeInternal, errors.New("internal error")),
+			wantCode: connect.CodeInternal, wantReason: apperr.ReasonInternal,
+		},
 	}
-	if _, ok := errors.AsType[*connect.Error](err); ok {
-		t.Errorf("expected raw context error (no connect error / no details), got %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := sanitizeError(tt.ctx, "/test.v1.Svc/Method", tt.err)
+			if code := connect.CodeOf(err); code != tt.wantCode {
+				t.Fatalf("code = %v, want %v", code, tt.wantCode)
+			}
+			if got := errorInfoFrom(t, err).GetReason(); got != string(tt.wantReason) {
+				t.Errorf("reason = %q, want %q", got, tt.wantReason)
+			}
+			if got := requestInfoFrom(t, err).GetRequestId(); got != "id-done" {
+				t.Errorf("request id = %q, want id-done", got)
+			}
+		})
 	}
 }
 

@@ -29,6 +29,9 @@ import (
 // re-panics on http.ErrAbortHandler, and the authn middleware and mux routing sit
 // outside this hook entirely).
 func RecoverHandlerPanic(ctx context.Context, spec connect.Spec, _ http.Header, p any) error {
+	// A panic is a bug whether or not the client left, so it skips the
+	// canceled-request rule that would make it a WARN and drop its record.
+	ctx = context.WithoutCancel(ctx)
 	err := fmt.Errorf("panic in RPC handler: %v", p)
 	slog.ErrorContext(ctx, "recovered panic in RPC handler",
 		slogx.Error(err),

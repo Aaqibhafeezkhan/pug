@@ -418,12 +418,16 @@ func TestLoopbackRecoversPanicOutsideConnect(t *testing.T) {
 	}
 }
 
-type tenantCaptureHandler struct{ tenants []correlation.Tenant }
+type tenantCaptureHandler struct {
+	tenants []correlation.Tenant
+	errs    []error
+}
 
 func (h *tenantCaptureHandler) Enabled(context.Context, slog.Level) bool { return true }
 func (h *tenantCaptureHandler) Handle(ctx context.Context, r slog.Record) error {
 	if r.Message == "recovered panic in mcp loopback handler" {
 		h.tenants = append(h.tenants, correlation.TenantFromContext(ctx))
+		h.errs = append(h.errs, ctx.Err())
 	}
 	return nil
 }
@@ -454,6 +458,32 @@ func TestLoopbackPanicLogNamesTenant(t *testing.T) {
 	want := correlation.Tenant{OrgID: "org-1", ProjectID: "proj-1"}
 	if len(logs.tenants) != 1 || logs.tenants[0] != want {
 		t.Errorf("panic log tenants = %+v, want one with %+v", logs.tenants, want)
+	}
+}
+
+// Do's deferred timeout cancel runs before its recover, so the panic must be logged
+// under a live context or the log handler would turn it into a WARN.
+func TestLoopbackPanicLogsUnderALiveContext(t *testing.T) {
+	logs := &tenantCaptureHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(logs))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	lb := &loopbackClient{handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("boom outside the connect chain")
+	})}
+	req, err := http.NewRequestWithContext(
+		correlation.WithID(withAPIKey(context.Background(), testPrivateKey), "test-correlation-id"),
+		http.MethodPost, loopbackBaseURL+"/shared.x/Y", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	if _, err := lb.Do(req); err == nil {
+		t.Fatal("Do returned nil error after a handler panic")
+	}
+	if len(logs.errs) != 1 || logs.errs[0] != nil {
+		t.Errorf("panic log ctx errors = %v, want one live context", logs.errs)
 	}
 }
 

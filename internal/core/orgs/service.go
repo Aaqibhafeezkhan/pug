@@ -473,6 +473,9 @@ func (s *Service) invalidateMemberRole(ctx context.Context, orgID, customerID st
 	if s.roleCache == nil {
 		return
 	}
+	// The change has committed, so finish even if the client left. go-redis times out
+	// the call itself.
+	ctx = context.WithoutCancel(ctx)
 	cacheKey := memberRoleCacheKey(orgID, customerID)
 	if err := memberRoleInvalidateScript.Run(ctx, s.roleCache,
 		[]string{memberRoleGenCacheKey(orgID, customerID), cacheKey},

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	corebilling "github.com/pug-sh/pug/internal/core/billing"
 	"github.com/pug-sh/pug/internal/core/billing/entitlement"
 	"github.com/pug-sh/pug/internal/core/billing/subscription"
+	"github.com/pug-sh/pug/internal/correlation"
 	"github.com/pug-sh/pug/internal/testutil"
 )
 
@@ -287,5 +289,36 @@ func TestPanicIsContainedAsA500(t *testing.T) {
 	res := post(t, mux, BillingPath("stub"), goodBody)
 	if res.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", res.StatusCode)
+	}
+}
+
+// ctxCaptureHandler keeps the context of the last record it handled.
+type ctxCaptureHandler struct{ ctx context.Context }
+
+func (h *ctxCaptureHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *ctxCaptureHandler) Handle(ctx context.Context, _ slog.Record) error {
+	h.ctx = ctx
+	return nil
+}
+func (h *ctxCaptureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *ctxCaptureHandler) WithGroup(string) slog.Handler      { return h }
+
+// The handler's deferred timeout cancel runs before its recover, so the panic must
+// be logged under a live context or the log handler would turn it into a WARN.
+func TestPanicLogsUnderALiveContext(t *testing.T) {
+	logs := &ctxCaptureHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(logs))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(goodBody))
+	h := &billingHandler{verifier: panickingProvider{stubProvider{name: "stub"}}}
+	h.ServeHTTP(httptest.NewRecorder(), req.WithContext(correlation.WithID(req.Context(), "id-1")))
+
+	if logs.ctx == nil {
+		t.Fatal("the panic was not logged")
+	}
+	if err := logs.ctx.Err(); err != nil {
+		t.Errorf("panic logged under a done context (%v), so it would log as a cancel", err)
 	}
 }
