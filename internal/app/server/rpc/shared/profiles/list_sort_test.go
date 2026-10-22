@@ -86,13 +86,17 @@ func TestList_SortedPagesResumeFromToken(t *testing.T) {
 	// skips the remaining person under either sort.
 	base := time.Now().UTC().Truncate(time.Second).Add(-time.Hour + 500*time.Millisecond)
 	ids := make([]string, pageSize+1)
+	var events []testutil.Event
 	for i := range ids {
 		ids[i] = fmt.Sprintf("anon-%03d", i)
 		for _, ms := range []int{i, 1000 - i} {
-			testutil.InsertEvent(ctx, t, ch.Conn, uuid.NewString(), projectID, ids[i], "page_view", uuid.NewString(),
-				map[string]string{}, map[string]string{}, base.Add(time.Duration(ms)*time.Millisecond))
+			events = append(events, testutil.Event{
+				EventID: uuid.NewString(), ProjectID: projectID, DistinctID: ids[i], Kind: "page_view",
+				SessionID: uuid.NewString(), OccurTime: base.Add(time.Duration(ms) * time.Millisecond),
+			})
 		}
 	}
+	testutil.InsertEvents(ctx, t, ch.Conn, events...)
 	newestFirst := slices.Clone(ids)
 	slices.Reverse(newestFirst)
 

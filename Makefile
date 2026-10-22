@@ -98,13 +98,17 @@ build:
 fmt:
 	rg --files -g '*.go' -g '!internal/gen/**' | xargs -r goimports -w
 
+# internal/lint is gated by `make lint` (its own CI job); running it here as well
+# only adds the suite's most CPU-hungry package to the run.
+TEST_PKGS = $(shell go list ./... | grep -v '/internal/lint$$')
+
 .PHONY: test
 test:
-	go test ./... -race -count=1 -shuffle=on
+	go test $(TEST_PKGS) -race -count=1 -shuffle=on
 
 .PHONY: cover
 cover:
-	go test ./... -race -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage.out
+	go test $(TEST_PKGS) -race -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage.out
 
 .PHONY: psql
 psql:

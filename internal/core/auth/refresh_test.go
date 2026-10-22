@@ -17,7 +17,7 @@ import (
 func seedSignedInCustomer(t *testing.T, svc *auth.Service, write *dbwrite.Queries, id, email string) auth.Session {
 	t.Helper()
 	ctx := context.Background()
-	hash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("bcrypt: %v", err)
 	}

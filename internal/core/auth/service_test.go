@@ -64,7 +64,7 @@ func TestAuthService(t *testing.T) {
 	// Password signup was removed; the supported way to gain a password is the
 	// authenticated SetPassword flow. Seed the bcrypt hash directly here to
 	// exercise SignInWithEmail without that round-trip.
-	hash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("bcrypt: %v", err)
 	}

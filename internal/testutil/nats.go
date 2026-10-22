@@ -41,7 +41,7 @@ var natsContainer = &lazyContainer[sharedNATS]{kind: "nats", start: startNATS}
 
 // SetupNATS returns a URL onto the package's NATS container with the configured
 // streams and consumers freshly created. The container is started once per test
-// binary and torn down by Main.
+// binary and released by Main.
 //
 // Unlike Postgres and ClickHouse, JetStream has no per-test namespace to hand
 // out, so isolation comes from rebuilding the streams on every call: dropping a
@@ -94,7 +94,7 @@ func startNATS() (_ *sharedNATS, err error) {
 	}
 
 	teardowns.add(func() error {
-		if err := testcontainers.TerminateContainer(ctr); err != nil {
+		if err := release(ctr); err != nil {
 			return fmt.Errorf("terminate nats container: %w", err)
 		}
 		return nil

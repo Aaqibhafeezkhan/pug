@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pug-sh/pug/internal/app/server/rpc"
 	"github.com/pug-sh/pug/internal/apperr"
+	chq "github.com/pug-sh/pug/internal/core/clickhouse"
 	coreprofiles "github.com/pug-sh/pug/internal/core/profiles"
 	natsdeps "github.com/pug-sh/pug/internal/deps/nats"
 	"github.com/pug-sh/pug/internal/deps/postgres"
@@ -457,16 +458,14 @@ func TestList_FilteredPagination(t *testing.T) {
 	ch := testutil.SetupClickHouse(t)
 	projectID := xid.New().String()
 
+	var profiles []chProfile
 	for i := range pageSize + 1 {
-		seedCHProfileWithProperties(t, ctx, ch, projectID, fmt.Sprintf("pro-%03d@example.com", i), map[string]any{
-			"segment": "pro",
-		})
+		profiles = append(profiles, chProfile{fmt.Sprintf("pro-%03d@example.com", i), map[string]any{"segment": "pro"}})
 	}
 	for i := range 5 {
-		seedCHProfileWithProperties(t, ctx, ch, projectID, fmt.Sprintf("free-%03d@example.com", i), map[string]any{
-			"segment": "free",
-		})
+		profiles = append(profiles, chProfile{fmt.Sprintf("free-%03d@example.com", i), map[string]any{"segment": "free"}})
 	}
+	seedCHProfileRows(t, ctx, ch, projectID, profiles)
 
 	client := newProfilesTestClient(t, NewServer(coreprofiles.NewService(nil, ch.Conn, &natsdeps.NATSClient{})), projectID)
 	stream, err := client.List(ctx, connect.NewRequest(&profilesv1.ListRequest{
@@ -799,8 +798,39 @@ func seedCHProfileWithID(t *testing.T, ctx context.Context, ch *testutil.TestCli
 
 func seedCHProfiles(t *testing.T, ctx context.Context, ch *testutil.TestClickHouse, projectID string, count int) {
 	t.Helper()
+	profiles := make([]chProfile, count)
 	for i := range count {
-		seedCHProfileWithProperties(t, ctx, ch, projectID, fmt.Sprintf("user-%03d@example.com", i), map[string]any{"index": i})
+		profiles[i] = chProfile{fmt.Sprintf("user-%03d@example.com", i), map[string]any{"index": i}}
+	}
+	seedCHProfileRows(t, ctx, ch, projectID, profiles)
+}
+
+type chProfile struct {
+	externalID string
+	properties map[string]any
+}
+
+// seedCHProfileRows inserts profiles in one batch, since each insert costs a part
+// and a hundred of them take seconds.
+func seedCHProfileRows(t *testing.T, ctx context.Context, ch *testutil.TestClickHouse, projectID string, profiles []chProfile) {
+	t.Helper()
+
+	batch, err := ch.Conn.PrepareBatch(ctx, chq.ProfilesInsertStmt)
+	if err != nil {
+		t.Fatalf("prepare clickhouse profile batch: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, p := range profiles {
+		rawProperties, err := json.Marshal(p.properties)
+		if err != nil {
+			t.Fatalf("marshal properties for %q: %v", p.externalID, err)
+		}
+		if err := batch.Append(xid.New().String(), projectID, p.externalID, string(rawProperties), uint8(0), now, now); err != nil {
+			t.Fatalf("append clickhouse profile %q: %v", p.externalID, err)
+		}
+	}
+	if err := batch.Send(); err != nil {
+		t.Fatalf("insert %d clickhouse profiles: %v", len(profiles), err)
 	}
 }
 
