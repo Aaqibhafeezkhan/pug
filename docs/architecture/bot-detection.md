@@ -52,12 +52,15 @@ which would be attacker-chosen.
 ### Signal 2: datacenter network (server, via Cloudflare)
 
 Cloudflare knows which network (ASN) every request comes from. A Transform Rule
-on the zone adds it as a request header (`CF-ASN` set to
+on the zone puts it in a request header (`X-Pug-ASN` set to
 `to_string(ip.src.asnum)`), free on every plan, with no IP-range list to
-download or keep fresh. The handler compares the number against a short Go list,
-`datacenterASNs`, of networks that only host servers. Same trust model as
-`CF-IPCountry`: it means something because the origin is only reachable through
-Cloudflare; a self-hosted pug without the rule just has this signal off.
+download or keep fresh. The name can't start with `cf-` or `x-cf-`: Cloudflare
+refuses to set those. The handler compares the number against a short Go list,
+`datacenterASNs`, of networks that only host servers. Unlike `CF-IPCountry`,
+which Cloudflare writes itself, a client can send this header too. The rule's
+Set overwrites it, so the rule must cover every ingest host, and the origin must
+be reachable only through Cloudflare. Without the rule, the header is whatever
+the client sent, which can only tag the sender's own events.
 
 Membership rule: a network goes on the list only if essentially nobody browses
 from it. Starter list:
@@ -119,7 +122,7 @@ when both signals fire. Both are server-only auto-properties (`$bot`,
 picker lists it and a dashboard can already break down by it. The counter
 `events.bot_tagged_total{project_id, signal}` counts tagged events by signal
 (`user_agent` / `asn`); an
-unparseable `CF-ASN` counts on `events.cdn_header_parse_failed_total`. Nothing
+unparseable `X-Pug-ASN` counts on `events.cdn_header_parse_failed_total`. Nothing
 is dropped.
 
 ### Query toggle
