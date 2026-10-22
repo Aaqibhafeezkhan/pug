@@ -14,7 +14,7 @@ import (
 	"github.com/pug-sh/pug/internal/deps/telemetry"
 )
 
-// AuthzInterceptor is the single authorization gate. For every role-gated
+// AuthzInterceptor is the single authorization gate. For every unary role-gated
 // procedure in permissionRegistry it resolves the caller's org role and enforces
 // the recorded (resource, action) against the shared authz policy. Any other
 // registered procedure passes through untouched, except a self-write by a demo
@@ -109,8 +109,14 @@ func authorizeRoleGated(
 		return err
 	}
 
-	_, err = requirePermission(ctx, authorizer, lookup, orgID, spec.Resource(), spec.Action())
-	return err
+	if _, err := requirePermission(ctx, authorizer, lookup, orgID, spec.Resource(), spec.Action()); err != nil {
+		return err
+	}
+	// Only once authorized, so a log never names an org the caller was refused.
+	if spec.OrgSource() == authzspec.OrgFromMessage {
+		telemetry.SetTenant(ctx, orgID, "")
+	}
+	return nil
 }
 
 // resolveOrgID returns the org a role-gated RPC is authorized in, per its

@@ -11,9 +11,7 @@ import (
 	"time"
 
 	"connectrpc.com/authn"
-	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect"
-	"connectrpc.com/validate"
 	"github.com/pug-sh/pug/internal/app/server/mcp"
 	pogrpc "github.com/pug-sh/pug/internal/app/server/rpc"
 	billingrpc "github.com/pug-sh/pug/internal/app/server/rpc/dashboard/billing"
@@ -95,29 +93,7 @@ func start(ctx context.Context, d *deps) error {
 	insightsExecutor := coreinsights.NewExecutor(d.ch)
 	insightsSvc := coreinsights.NewService(insightsExecutor, d.redis.Unwrap())
 
-	// Order is load-bearing. Correlation first so the id is in context downstream;
-	// otel outside ErrorInterceptor so a span exists for trace_id; ErrorInterceptor
-	// outside validate, which short-circuits a bad request without calling the inner
-	// chain; Logging outside that, so it observes the final resolved code. Authz is
-	// innermost and is the only authorization gate; handlers carry none of their own.
-	//
-	// WithRecover is required, not cosmetic: on the /mcp loopback the handler runs on
-	// a jsonrpc2 goroutine that no net/http recover reaches, so an escaping panic
-	// would kill the process for every tenant.
-	handlerOpts := connect.WithHandlerOptions(
-		connect.WithInterceptors(
-			pogrpc.CorrelationInterceptor(),
-			d.otelInterceptor,
-			pogrpc.LoggingInterceptor(),
-			pogrpc.ErrorInterceptor(),
-			validate.NewInterceptor(validate.WithoutErrorDetails()),
-			pogrpc.PrincipalInterceptor(),
-			pogrpc.AuthzInterceptor(d.authz, orgsSvc),
-		),
-		connect.WithRecover(pogrpc.RecoverHandlerPanic),
-		// The decompressed message: WithRequestLimits only sees the gzipped wire bytes.
-		connect.WithReadMaxBytes(pogrpc.MaxRequestBytes),
-	)
+	handlerOpts := pogrpc.HandlerOptions(d.otelInterceptor, d.authz, orgsSvc)
 
 	dashboardMW := authn.NewMiddleware(pogrpc.WithJWTAuth(d.jwtKey, queriesRo))
 	sdkMW := authn.NewMiddleware(pogrpc.WithSDKAuth(projectsRepo))

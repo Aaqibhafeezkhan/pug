@@ -17,3 +17,29 @@ func TestIDFromContext_emptyWhenUnset(t *testing.T) {
 		t.Errorf("IDFromContext = %q, want empty", got)
 	}
 }
+
+func TestSetTenant_reachesParentContext(t *testing.T) {
+	ctx := WithTenant(context.Background())
+	want := Tenant{OrgID: "org-1", ProjectID: "proj-1"}
+	SetTenant(WithID(ctx, "abc123"), want)
+	if got := TenantFromContext(ctx); got != want {
+		t.Errorf("TenantFromContext = %+v, want %+v", got, want)
+	}
+}
+
+func TestSetTenant_replaces(t *testing.T) {
+	ctx := WithTenant(context.Background())
+	SetTenant(ctx, Tenant{OrgID: "org-1", ProjectID: "proj-1"})
+	SetTenant(ctx, Tenant{OrgID: "org-2"})
+	if got := TenantFromContext(ctx); got != (Tenant{OrgID: "org-2"}) {
+		t.Errorf("TenantFromContext = %+v, want org-2 alone", got)
+	}
+}
+
+func TestSetTenant_noOpWithoutWithTenant(t *testing.T) {
+	ctx := context.Background()
+	SetTenant(ctx, Tenant{OrgID: "org-1"})
+	if got := TenantFromContext(ctx); got != (Tenant{}) {
+		t.Errorf("TenantFromContext = %+v, want zero", got)
+	}
+}

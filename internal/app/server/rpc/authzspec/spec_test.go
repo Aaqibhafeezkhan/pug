@@ -83,3 +83,24 @@ func TestZeroSpecIsNotDefined(t *testing.T) {
 		t.Error("zero Spec{} must not be role-gated")
 	}
 }
+
+func TestIsProjectScoped(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec Spec
+		want bool
+	}{
+		{"ProjGated", ProjGated(authz.ResourceDashboard, authz.ActionRead), true},
+		{"Project", Project(), true},
+		{"SDKKey", SDKKey(), true},
+		{"OrgGated", OrgGated(authz.ResourceMember, authz.ActionRead), false},
+		{"SelfRead", SelfRead(), false},
+		{"SelfWrite", SelfWrite(), false},
+		{"Public", Public(), false},
+		{"unset", Spec{}, false},
+	} {
+		if got := tc.spec.IsProjectScoped(); got != tc.want {
+			t.Errorf("%s: IsProjectScoped = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

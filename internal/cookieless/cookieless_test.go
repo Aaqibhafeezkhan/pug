@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pug-sh/pug/internal/correlation"
 )
 
 func fixedResolver(now time.Time) *Resolver {
@@ -294,5 +297,30 @@ func TestDayOf_MidnightEdges(t *testing.T) {
 	todayMidnight := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
 	if day, ok := r.DayOf(todayMidnight); !ok || day != "20260720" {
 		t.Errorf("DayOf(today 00:00) = (%q,%v), want (\"20260720\",true)", day, ok)
+	}
+}
+
+type tenantCaptureHandler struct{ tenants []correlation.Tenant }
+
+func (h *tenantCaptureHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *tenantCaptureHandler) Handle(ctx context.Context, _ slog.Record) error {
+	h.tenants = append(h.tenants, correlation.TenantFromContext(ctx))
+	return nil
+}
+func (h *tenantCaptureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *tenantCaptureHandler) WithGroup(string) slog.Handler      { return h }
+
+func TestDegrade_ThrottledLogNamesNoTenant(t *testing.T) {
+	logs := &tenantCaptureHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(logs))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	ctx := correlation.WithTenant(context.Background())
+	correlation.SetTenant(ctx, correlation.Tenant{OrgID: "org-1", ProjectID: "proj-1"})
+	New(nil).degrade(ctx, DegradeGetFailed, errors.New("connection refused"), IDPrefix+"v", "20260720")
+
+	if len(logs.tenants) != 1 || logs.tenants[0] != (correlation.Tenant{}) {
+		t.Errorf("degrade log tenants = %+v, want one naming none", logs.tenants)
 	}
 }

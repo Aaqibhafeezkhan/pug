@@ -141,6 +141,12 @@ func (s Spec) IsRoleGated() bool { return s.kind == kindRoleGated }
 // AuthzInterceptor refuses these RPCs for the demo account.
 func (s Spec) IsSelfWrite() bool { return s.kind == kindSelfWrite }
 
+// IsProjectScoped reports whether the RPC acts for the caller's project: the
+// x-project-id project on the JWT path, the key's project on the API-key path.
+func (s Spec) IsProjectScoped() bool {
+	return s.kind == kindProject || s.kind == kindSDKKey || s.orgSource == OrgFromProject
+}
+
 // Resource is the enforced resource for a role-gated Spec (empty otherwise).
 func (s Spec) Resource() authz.Resource { return s.resource }
 

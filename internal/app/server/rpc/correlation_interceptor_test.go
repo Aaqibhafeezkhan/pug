@@ -76,3 +76,29 @@ func TestCorrelationInterceptor_SetsID_Streaming(t *testing.T) {
 		t.Fatalf("expected a valid xid in context, got %q: %v", seen, err)
 	}
 }
+
+func TestCorrelationInterceptor_givesTenantToFill(t *testing.T) {
+	want := correlation.Tenant{OrgID: "org-1", ProjectID: "proj-1"}
+
+	var unary, streaming correlation.Tenant
+	next := connect.UnaryFunc(func(ctx context.Context, _ connect.AnyRequest) (connect.AnyResponse, error) {
+		correlation.SetTenant(ctx, want)
+		unary = correlation.TenantFromContext(ctx)
+		return connect.NewResponse(&emptypb.Empty{}), nil
+	})
+	if _, err := CorrelationInterceptor().WrapUnary(next)(context.Background(), connect.NewRequest(&emptypb.Empty{})); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	nextStream := connect.StreamingHandlerFunc(func(ctx context.Context, _ connect.StreamingHandlerConn) error {
+		correlation.SetTenant(ctx, want)
+		streaming = correlation.TenantFromContext(ctx)
+		return nil
+	})
+	if err := CorrelationInterceptor().WrapStreamingHandler(nextStream)(context.Background(), nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if unary != want || streaming != want {
+		t.Errorf("tenant unary = %+v, streaming = %+v, want %+v", unary, streaming, want)
+	}
+}

@@ -8,9 +8,15 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+const (
+	orgIDKey     = "org_id"
+	projectIDKey = "project_id"
+)
+
 // correlationHandler stamps the per-request correlation id (and the trace id
 // when a span is active) onto every log record, so all logs for a request
-// correlate with the error_id returned to the client. No-ops when neither is set.
+// correlate with the error_id returned to the client. It also stamps the
+// request's tenant once known. No-ops when none is set.
 type correlationHandler struct{ inner slog.Handler }
 
 func newCorrelationHandler(inner slog.Handler) slog.Handler {
@@ -36,7 +42,30 @@ func (h *correlationHandler) Handle(ctx context.Context, r slog.Record) error {
 	if sc := trace.SpanContextFromContext(ctx); sc.HasTraceID() {
 		r.AddAttrs(slog.String("trace_id", sc.TraceID().String()))
 	}
+	if t := correlation.TenantFromContext(ctx); t != (correlation.Tenant{}) {
+		addTenant(&r, t)
+	}
 	return h.inner.Handle(ctx, r)
+}
+
+// addTenant leaves an org_id or project_id the call site set itself, so the key
+// appears once and the explicit value wins.
+func addTenant(r *slog.Record, t correlation.Tenant) {
+	r.Attrs(func(a slog.Attr) bool {
+		switch a.Key {
+		case orgIDKey:
+			t.OrgID = ""
+		case projectIDKey:
+			t.ProjectID = ""
+		}
+		return true
+	})
+	if t.OrgID != "" {
+		r.AddAttrs(slog.String(orgIDKey, t.OrgID))
+	}
+	if t.ProjectID != "" {
+		r.AddAttrs(slog.String(projectIDKey, t.ProjectID))
+	}
 }
 
 func (h *correlationHandler) WithAttrs(attrs []slog.Attr) slog.Handler {

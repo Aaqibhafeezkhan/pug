@@ -15,6 +15,7 @@ import (
 	orgshandler "github.com/pug-sh/pug/internal/app/server/rpc/dashboard/orgs"
 	"github.com/pug-sh/pug/internal/apperr"
 	coreorgs "github.com/pug-sh/pug/internal/core/orgs"
+	"github.com/pug-sh/pug/internal/correlation"
 	orgsv1 "github.com/pug-sh/pug/internal/gen/proto/dashboard/orgs/v1"
 	"github.com/pug-sh/pug/internal/gen/repo/dbread"
 	"github.com/pug-sh/pug/internal/gen/repo/dbwrite"
@@ -112,11 +113,15 @@ func TestLeaveHandlerHappyPath(t *testing.T) {
 		t.Fatalf("read member: %v", err)
 	}
 
+	leaveCtx := correlation.WithTenant(ctxWithCustomer(ctx, memberCustomer))
 	if _, err := srv.Leave(
-		ctxWithCustomer(ctx, memberCustomer),
+		leaveCtx,
 		connect.NewRequest(&orgsv1.LeaveRequest{OrgId: proto.String(org.ID)}),
 	); err != nil {
 		t.Fatalf("Leave: %v", err)
+	}
+	if got := correlation.TenantFromContext(leaveCtx); got != (correlation.Tenant{OrgID: org.ID}) {
+		t.Errorf("tenant = %+v, want org %s alone", got, org.ID)
 	}
 }
 

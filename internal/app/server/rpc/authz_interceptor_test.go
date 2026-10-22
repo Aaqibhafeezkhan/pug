@@ -19,6 +19,7 @@ import (
 	coreauth "github.com/pug-sh/pug/internal/core/auth"
 	"github.com/pug-sh/pug/internal/core/authz"
 	coreorgs "github.com/pug-sh/pug/internal/core/orgs"
+	"github.com/pug-sh/pug/internal/correlation"
 	customersv1 "github.com/pug-sh/pug/internal/gen/proto/dashboard/customers/v1"
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/customers/v1/customersv1connect"
 	orgsv1 "github.com/pug-sh/pug/internal/gen/proto/dashboard/orgs/v1"
@@ -248,6 +249,59 @@ func TestResolveOrgID(t *testing.T) {
 			t.Fatalf("code = %v, want Internal", apperrCode(err))
 		}
 	})
+}
+
+func TestAuthorizeRoleGatedSetsMessageOrgAsTenant(t *testing.T) {
+	authorizer := mustAuthorizer(t)
+	readMembers := authzspec.OrgGated(authz.ResourceMember, authz.ActionRead)
+
+	fromProject := correlation.Tenant{OrgID: "org-1", ProjectID: "proj-1"}
+
+	tests := []struct {
+		name    string
+		ctx     context.Context
+		seed    correlation.Tenant
+		lookup  fakeRoleLookup
+		spec    authzspec.Spec
+		wantErr bool
+		want    correlation.Tenant
+	}{
+		{
+			name:   "authorized org-scoped RPC names the message's org",
+			ctx:    customerCtx(),
+			lookup: fakeRoleLookup{role: coreorgs.RoleViewer},
+			spec:   readMembers,
+			want:   correlation.Tenant{OrgID: "org-9"},
+		},
+		{
+			name:    "refused org is never named",
+			ctx:     customerCtx(),
+			lookup:  fakeRoleLookup{err: coreorgs.ErrMemberNotFound},
+			spec:    readMembers,
+			wantErr: true,
+		},
+		{
+			name:   "project-scoped RPC keeps the principal's tenant",
+			ctx:    jwtProjectCtx(),
+			seed:   fromProject,
+			lookup: fakeRoleLookup{role: coreorgs.RoleViewer},
+			spec:   authzspec.ProjGated(authz.ResourceDashboard, authz.ActionRead),
+			want:   fromProject,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := correlation.WithTenant(tt.ctx)
+			correlation.SetTenant(ctx, tt.seed)
+			err := authorizeRoleGated(ctx, authorizer, tt.lookup, msgReq("org-9"), tt.spec)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got := correlation.TenantFromContext(ctx); got != tt.want {
+				t.Errorf("tenant = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
 }
 
 // TestAuthzInterceptorRegistryEntriesEnforced ties the registry to the runtime:
@@ -658,5 +712,24 @@ func TestAuthzInterceptorRefusesDemoSelfWrites(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestStreamingRPCsNeedOnlyMembership: AuthzInterceptor gates unary RPCs only, so a
+// streaming RPC is safe only as a project read every role may make.
+func TestStreamingRPCsNeedOnlyMembership(t *testing.T) {
+	authorizer := mustAuthorizer(t)
+	for _, svc := range servedServices {
+		for method := range svc.handler.Methods() {
+			if method.Type.NumOut() != 1 { // a streaming handler returns only an error
+				continue
+			}
+			proc := "/" + svc.name + "/" + method.Name
+			spec := permissionRegistry[proc]
+			ok, err := authorizer.Authorize(coreorgs.RoleViewer.String(), spec.Resource(), spec.Action())
+			if err != nil || !ok || spec.OrgSource() != authzspec.OrgFromProject {
+				t.Errorf("streaming RPC %s needs more than project membership, which AuthzInterceptor cannot enforce", proc)
+			}
+		}
 	}
 }

@@ -5,15 +5,17 @@ import (
 	"log/slog"
 
 	"connectrpc.com/connect"
+	"github.com/pug-sh/pug/internal/deps/telemetry"
 	"github.com/pug-sh/pug/internal/slogx"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
 // PrincipalInterceptor enriches the active OTel span with attributes from the
-// authenticated Principal. It must be registered after the OTel interceptor
-// (so a span exists) and requires the authn middleware to have already placed
-// a Principal in the context.
+// authenticated Principal, and makes its project the tenant of a project-scoped RPC.
+// It must be registered after the OTel interceptor (so a span exists) and before
+// validate (so a request that fails validation still names its tenant), and requires
+// the authn middleware to have already placed a Principal in the context.
 func PrincipalInterceptor() connect.Interceptor {
 	return &principalInterceptor{}
 }
@@ -22,7 +24,7 @@ type principalInterceptor struct{}
 
 func (i *principalInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-		enrichSpanWithPrincipal(ctx)
+		enrichSpanWithPrincipal(ctx, req.Spec().Procedure)
 		return next(ctx, req)
 	}
 }
@@ -33,12 +35,12 @@ func (i *principalInterceptor) WrapStreamingClient(next connect.StreamingClientF
 
 func (i *principalInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
-		enrichSpanWithPrincipal(ctx)
+		enrichSpanWithPrincipal(ctx, conn.Spec().Procedure)
 		return next(ctx, conn)
 	}
 }
 
-func enrichSpanWithPrincipal(ctx context.Context) {
+func enrichSpanWithPrincipal(ctx context.Context, procedure string) {
 	// getPrincipalFromContext is called directly here (not via MustGet* extractors)
 	// because the interceptor must gracefully handle unauthenticated requests (public endpoints).
 	principal, err := getPrincipalFromContext(ctx)
@@ -61,10 +63,10 @@ func enrichSpanWithPrincipal(ctx context.Context) {
 	if principal.Customer != nil {
 		attrs = append(attrs, attribute.String("customer.id", principal.Customer.ID))
 	}
-	if principal.Project != nil {
-		attrs = append(attrs, attribute.String("project.id", principal.Project.ID))
-		attrs = append(attrs, attribute.String("org.id", principal.Project.OrgID))
-	}
 
 	span.SetAttributes(attrs...)
+	// An org-scoped RPC acts for its message's org, not an x-project-id it was sent.
+	if principal.Project != nil && permissionRegistry[procedure].IsProjectScoped() {
+		telemetry.SetTenant(ctx, principal.Project.OrgID, principal.Project.ID)
+	}
 }
