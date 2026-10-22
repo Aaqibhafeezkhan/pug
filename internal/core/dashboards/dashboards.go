@@ -102,13 +102,8 @@ type DashboardWithTiles struct {
 
 // recordServiceError logs + records a service-layer error at the layer that detects
 // it (per telemetry.md), then returns it unchanged so handlers map the status. It
-// is the single chokepoint for the service's DB error paths. On a canceled request
-// the error is returned unchanged but NOT logged or recorded: the caller chose to
-// leave (mirrors the insights executor's recordQueryError).
+// is the single chokepoint for the service's DB error paths.
 func recordServiceError(ctx context.Context, msg string, err error, attrs ...any) error {
-	if errors.Is(ctx.Err(), context.Canceled) {
-		return err
-	}
 	slog.ErrorContext(ctx, msg, append([]any{slogx.Error(err)}, attrs...)...)
 	telemetry.RecordError(ctx, err)
 	return err

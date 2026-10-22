@@ -288,7 +288,7 @@ func (s *Service) GetFilterSchema(ctx context.Context, projectID, eventKind stri
 			// failure must NOT fail the whole schema: degrade to count-0
 			// dimensions — mergePromotedAutoDimensions still lists every dim — so
 			// the picker stays populated. QueryAggregateKeys already logs+records
-			// non-context query failures, so this is only a disposition line, not a
+			// query failures, so this is only a disposition line, not a
 			// second RecordError; swallowing keeps egCtx alive for the sibling
 			// fetches. (A context cancellation here means a sibling already failed;
 			// its error surfaces from eg.Wait.)

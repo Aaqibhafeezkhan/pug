@@ -271,8 +271,7 @@ func buildQueryError(ctx context.Context, projectID, insight string, usedRollup 
 // the generic message: the executor preserves its identity via %w, and callers
 // such as dashboards.renderInsightTile rely on errors.Is(err, context.Canceled)
 // to propagate it as a request-level failure instead of masking it as a per-tile
-// error. recordQueryError already logged it unless it was a cancel, so it is not
-// logged here.
+// error.
 func queryFailed(err error) error {
 	if isContextError(err) {
 		return err

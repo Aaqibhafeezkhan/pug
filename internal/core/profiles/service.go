@@ -225,7 +225,7 @@ func (s *Service) getSingle(ctx context.Context, projectID string, includeBots b
 		return Profile{}, err
 	}
 	defer func() {
-		if err := rows.Close(); err != nil && !errors.Is(ctx.Err(), context.Canceled) {
+		if err := rows.Close(); err != nil {
 			slog.ErrorContext(ctx, "failed to close ClickHouse rows", slogx.Error(err))
 			telemetry.RecordError(ctx, err)
 		}
@@ -280,7 +280,7 @@ func (s *Service) List(ctx context.Context, params ListParams) ([]ListedProfile,
 		return nil, err
 	}
 	defer func() {
-		if err := rows.Close(); err != nil && !errors.Is(ctx.Err(), context.Canceled) {
+		if err := rows.Close(); err != nil {
 			slog.ErrorContext(ctx, "failed to close ClickHouse rows", slogx.Error(err))
 			telemetry.RecordError(ctx, err)
 		}
@@ -515,7 +515,7 @@ func (s *Service) resolveAliasTarget(ctx context.Context, projectID, aliasID str
 		return "", false, err
 	}
 	defer func() {
-		if err := rows.Close(); err != nil && !errors.Is(ctx.Err(), context.Canceled) {
+		if err := rows.Close(); err != nil {
 			slog.ErrorContext(ctx, "failed to close ClickHouse rows", slogx.Error(err))
 			telemetry.RecordError(ctx, err)
 		}

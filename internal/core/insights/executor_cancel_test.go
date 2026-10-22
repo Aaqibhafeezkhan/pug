@@ -74,25 +74,6 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-// A cancel usually lands after Query returns the first block, so it can surface
-// from Err and Close too.
-func TestExecutorDoesNotLogACancel(t *testing.T) {
-	logs := captureLogs(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	for _, midStream := range []bool{false, true} {
-		for name, query := range executorQueries(NewExecutor(streamConn{err: context.Canceled, midStream: midStream})) {
-			logs.Reset()
-			if err := query(ctx); !errors.Is(err, context.Canceled) {
-				t.Errorf("%s (midStream=%t): err = %v", name, midStream, err)
-			}
-			if strings.Contains(logs.String(), "level=ERROR") {
-				t.Errorf("%s (midStream=%t) logged a cancel:\n%s", name, midStream, logs)
-			}
-		}
-	}
-}
-
 // A deadline means the query outran the request's budget, and a cancel on a live
 // request came from something other than the caller, so both log like any failure.
 func TestExecutorLogsAFailedStream(t *testing.T) {

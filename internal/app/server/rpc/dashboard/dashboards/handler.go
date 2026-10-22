@@ -40,7 +40,7 @@ func NewServer(service *coredashboards.Service, executor *coreinsights.Executor)
 // Context cancellation / deadline arriving mid-request surface as wrapped
 // pgx errors here, so the catch-all branch checks errors.Is before falling
 // back to CodeInternal. Service layer has already logged + recorded the
-// non-context error path; we don't duplicate.
+// error path; we don't duplicate.
 func serviceErrToConnect(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return rpc.ConnectCtxErr(err)
