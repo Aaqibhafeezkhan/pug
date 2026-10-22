@@ -109,9 +109,6 @@ func (s *Server) GetDeletionRequest(
 		if errors.Is(err, coreprofiles.ErrDeletionRequestNotFound) {
 			return nil, apperr.NotFound(apperr.ReasonDeletionRequestNotFound, "deletion request not found", apperr.Resource("deletion_request", requestID))
 		}
-		if ctx.Err() != nil {
-			return nil, rpc.ConnectCtxErr(ctx.Err())
-		}
 		// Already logged + recorded at the service layer; only translate for the client.
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get deletion request"))
 	}
@@ -278,19 +275,14 @@ func (s *Server) List(
 			Sort:        sort,
 		})
 		if err != nil {
-			if !errors.Is(ctx.Err(), context.Canceled) {
-				slog.ErrorContext(ctx, "failed listing profiles",
-					slogx.Error(err),
-					slog.String("project_id", principal.Project.ID),
-					slog.String("sort", string(sort)),
-					slog.Bool("has_cursor", hasCursor),
-					slog.String("cursor_id", cursorID),
-					slog.Int64("cursor_key", cursorKey))
-				telemetry.RecordError(ctx, err)
-			}
-			if ctx.Err() != nil {
-				return rpc.ConnectCtxErr(ctx.Err())
-			}
+			slog.ErrorContext(ctx, "failed listing profiles",
+				slogx.Error(err),
+				slog.String("project_id", principal.Project.ID),
+				slog.String("sort", string(sort)),
+				slog.Bool("has_cursor", hasCursor),
+				slog.String("cursor_id", cursorID),
+				slog.Int64("cursor_key", cursorKey))
+			telemetry.RecordError(ctx, err)
 			return connect.NewError(connect.CodeInternal, errors.New("failed to list profiles"))
 		}
 
@@ -323,9 +315,6 @@ func (s *Server) List(
 			listResp.NextPageToken = proto.String(nextPageToken)
 		}
 		if err := stream.Send(listResp); err != nil {
-			if ctx.Err() != nil {
-				return rpc.ConnectCtxErr(ctx.Err())
-			}
 			slog.ErrorContext(ctx, "failed sending profile stream", slogx.Error(err),
 				slog.String("project_id", principal.Project.ID))
 			telemetry.RecordError(ctx, err)
@@ -391,13 +380,8 @@ func (s *Server) getProfile(ctx context.Context, projectID, id string, includeBo
 		if errors.Is(err, coreprofiles.ErrProfileNotFound) {
 			return nil, apperr.NotFound(apperr.ReasonProfileNotFound, "profile not found", apperr.Resource("profile", id))
 		}
-		if !errors.Is(ctx.Err(), context.Canceled) {
-			slog.ErrorContext(ctx, "failed reading profile from clickhouse", slogx.Error(err), slog.String("profile_id", id))
-			telemetry.RecordError(ctx, err)
-		}
-		if ctx.Err() != nil {
-			return nil, rpc.ConnectCtxErr(ctx.Err())
-		}
+		slog.ErrorContext(ctx, "failed reading profile from clickhouse", slogx.Error(err), slog.String("profile_id", id))
+		telemetry.RecordError(ctx, err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get profile"))
 	}
 	pbProfile, err := convertProfile(profile)
@@ -418,13 +402,8 @@ func (s *Server) getProfileByExternalID(ctx context.Context, projectID, external
 		if errors.Is(err, coreprofiles.ErrProfileNotFound) {
 			return nil, apperr.NotFound(apperr.ReasonProfileNotFound, "profile not found", apperr.Resource("profile", externalID))
 		}
-		if !errors.Is(ctx.Err(), context.Canceled) {
-			slog.ErrorContext(ctx, "failed reading profile by external ID from clickhouse", slogx.Error(err), slog.String("external_id", externalID))
-			telemetry.RecordError(ctx, err)
-		}
-		if ctx.Err() != nil {
-			return nil, rpc.ConnectCtxErr(ctx.Err())
-		}
+		slog.ErrorContext(ctx, "failed reading profile by external ID from clickhouse", slogx.Error(err), slog.String("external_id", externalID))
+		telemetry.RecordError(ctx, err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get profile"))
 	}
 	pbProfile, err := convertProfile(profile)

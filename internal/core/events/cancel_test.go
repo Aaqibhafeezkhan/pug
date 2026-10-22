@@ -46,27 +46,26 @@ func (r emptyRows) Err() error   { return r.err }
 func (r emptyRows) Close() error { return r.err }
 
 var reads = []struct {
-	name        string
-	aliasLookup bool
-	read        func(context.Context, *events.Reader) error
+	name string
+	read func(context.Context, *events.Reader) error
 }{
-	{"GetEventExplorer", false, func(ctx context.Context, r *events.Reader) error {
+	{"GetEventExplorer", func(ctx context.Context, r *events.Reader) error {
 		_, _, err := r.GetEventExplorer(ctx, events.EventExplorerParams{ProjectID: "p"})
 		return err
 	}},
-	{"GetActivityFeed", true, func(ctx context.Context, r *events.Reader) error {
+	{"GetActivityFeed", func(ctx context.Context, r *events.Reader) error {
 		_, _, err := r.GetActivityFeed(ctx, events.ActivityFeedParams{ProjectID: "p", DistinctID: "u"})
 		return err
 	}},
-	{"GetActivityHeatmap", true, func(ctx context.Context, r *events.Reader) error {
+	{"GetActivityHeatmap", func(ctx context.Context, r *events.Reader) error {
 		_, err := r.GetActivityHeatmap(ctx, events.ActivityHeatmapParams{ProjectID: "p", DistinctID: "u"})
 		return err
 	}},
-	{"GetProfileStats", true, func(ctx context.Context, r *events.Reader) error {
+	{"GetProfileStats", func(ctx context.Context, r *events.Reader) error {
 		_, _, err := r.GetProfileStats(ctx, events.ProfileStatsParams{ProjectID: "p", DistinctID: "u"})
 		return err
 	}},
-	{"GetProfileSessions", true, func(ctx context.Context, r *events.Reader) error {
+	{"GetProfileSessions", func(ctx context.Context, r *events.Reader) error {
 		_, _, err := r.GetProfileSessions(ctx, events.ProfileSessionsParams{ProjectID: "p", DistinctID: "u"})
 		return err
 	}},
@@ -79,37 +78,6 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 	return &buf
-}
-
-// A cancel comes back to the handler without an ERROR line, whether it hits an
-// identity lookup, the alias lookup or the events read, at the start or mid-stream.
-func TestReadsDoNotLogACancel(t *testing.T) {
-	logs := captureLogs(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	for _, tc := range reads {
-		conns := []failingConn{
-			{err: context.Canceled},
-			{err: context.Canceled, midStream: true},
-			{err: context.Canceled, match: "FROM events"},
-			{err: context.Canceled, match: "FROM events", midStream: true},
-		}
-		if tc.aliasLookup {
-			conns = append(conns,
-				failingConn{err: context.Canceled, match: "WHERE profile_id"},
-				failingConn{err: context.Canceled, match: "WHERE profile_id", midStream: true})
-		}
-		for _, conn := range conns {
-			logs.Reset()
-			err := tc.read(ctx, events.NewReader(conn))
-			if !errors.Is(err, context.Canceled) {
-				t.Errorf("%s %v: err = %v, want canceled", tc.name, conn, err)
-			}
-			if strings.Contains(logs.String(), "level=ERROR") {
-				t.Errorf("%s %v logged a cancel:\n%s", tc.name, conn, logs)
-			}
-		}
-	}
 }
 
 // A deadline means the query outran the request's budget, and a cancel on a live
