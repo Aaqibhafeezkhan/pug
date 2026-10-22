@@ -28,7 +28,7 @@ type Check struct {
 // Analyzers is the registry the enforcement test iterates, so a new analyzer is
 // enforced the moment it is added here.
 func Analyzers() []*analysis.Analyzer {
-	return []*analysis.Analyzer{SlogxErr, SentinelErr, Principal, RecordErr, ChqTenant, ExhaustiveIgnore}
+	return []*analysis.Analyzer{SlogxErr, SentinelErr, Principal, RecordErr, ChqTenant, ExhaustiveIgnore, PanicCtx, GroupCtx}
 }
 
 func Checks() []Check {
