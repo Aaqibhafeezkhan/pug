@@ -350,7 +350,6 @@ func TestEnrichUserAgent(t *testing.T) {
 		useragent.PropBrowser:        "Google Chrome",
 		useragent.PropBrowserVersion: "118",
 		useragent.PropOS:             "Windows",
-		useragent.PropOSVersion:      "10",
 		useragent.PropMobile:         "false",
 	}
 
@@ -361,7 +360,7 @@ func TestEnrichUserAgent(t *testing.T) {
 		want     map[string]string // expected auto-properties on each event (nil = no UA props)
 	}{
 		{
-			name:     "chrome desktop — browser, os, osVersion set (no device for desktop)",
+			name:     "chrome desktop: browser and os set (no device for desktop)",
 			uaHeader: chromeWindowsUA,
 			events:   []*eventsv1.Event{{}},
 			want:     chromeProps,
@@ -387,7 +386,6 @@ func TestEnrichUserAgent(t *testing.T) {
 				useragent.PropBrowser:        "Google Chrome",
 				useragent.PropBrowserVersion: "118",
 				useragent.PropOS:             "Windows",
-				useragent.PropOSVersion:      "10",
 				useragent.PropMobile:         "false",
 			},
 		},
@@ -401,7 +399,6 @@ func TestEnrichUserAgent(t *testing.T) {
 				useragent.PropOS:             "iOS",    // client value preserved
 				useragent.PropBrowser:        "Google Chrome",
 				useragent.PropBrowserVersion: "118",
-				useragent.PropOSVersion:      "10",
 				useragent.PropMobile:         "false",
 			},
 		},
@@ -659,7 +656,6 @@ func TestEnrichGeoAndUserAgentAndBotScore(t *testing.T) {
 		useragent.PropOS:             "iOS",
 		useragent.PropBrowser:        "Google Chrome",
 		useragent.PropBrowserVersion: "118",
-		useragent.PropOSVersion:      "10",
 		useragent.PropMobile:         "false",
 		// Bot management (CDN headers overwrite client-supplied values).
 		"$bot_score":    "5",

@@ -1,6 +1,8 @@
 package useragent
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 
 	uaparser "github.com/ua-parser/uap-go/uaparser"
@@ -17,6 +19,18 @@ var browserFamilyNames = map[string]string{
 var osFamilyNames = map[string]string{
 	"Mac OS X": "macOS",
 }
+
+// OS versions a browser sends whatever the visitor runs, so they name no release.
+var frozenOSVersions = map[string]map[string]bool{
+	// Firefox caps at 10.15, Safari and Chromium send 10_15_7, Big Sur's compat mode sent 10.16.
+	"Mac OS X": {"10.15": true, "10.15.7": true, "10.16": true},
+	// NT 10.0 is Windows 10 and 11 alike.
+	"Windows":   {"10": true},
+	"Chrome OS": {"14541.0.0": true},
+}
+
+// Safari 26 froze the iOS token at 18.x, but on iOS, Safari's own version still names the release.
+var iosSafariVersion = regexp.MustCompile(`\sVersion/((\d+)(?:\.\d+)*)`)
 
 // linuxFamilies are ua-parser OS families that navigator.userAgentData collapses to
 // "Linux". Chrome OS is intentionally excluded — the SDK reports it as its own platform.
@@ -65,6 +79,31 @@ func joinVersion(parts ...string) string {
 	return strings.Join(out, ".")
 }
 
+// Chromium's reduced UA calls every Android release 10 and every device K.
+func isReducedAndroid(ua string) bool {
+	return strings.Contains(ua, "; Android 10; K)") || strings.Contains(ua, "; Android 10; K; wv)")
+}
+
+func osVersion(os *uaparser.Os, ua string) string {
+	switch os.Family {
+	case "iOS":
+		if m := iosSafariVersion.FindStringSubmatch(ua); m != nil {
+			if major, _ := strconv.Atoi(m[2]); major >= 26 {
+				return m[1]
+			}
+		}
+	case "Android":
+		if isReducedAndroid(ua) {
+			return ""
+		}
+	}
+	v := joinVersion(os.Major, os.Minor, os.Patch)
+	if frozenOSVersions[os.Family][v] {
+		return ""
+	}
+	return v
+}
+
 func inferMobile(ua, osFamily string) string {
 	switch osFamily {
 	case "iOS":
@@ -97,12 +136,12 @@ func propertiesFromUAParser(client *uaparser.Client, ua string) Properties {
 	osFamily := client.Os.Family
 	if osFamily != "" && osFamily != "Other" {
 		props[PropOS] = normalizeOSFamily(osFamily)
-		if v := joinVersion(client.Os.Major, client.Os.Minor, client.Os.Patch); v != "" {
+		if v := osVersion(client.Os, ua); v != "" {
 			props[PropOSVersion] = v
 		}
 	}
 
-	if client.Device.Family != "" && client.Device.Family != "Other" {
+	if client.Device.Family != "" && client.Device.Family != "Other" && !isReducedAndroid(ua) {
 		props[PropDevice] = client.Device.Family
 	}
 
