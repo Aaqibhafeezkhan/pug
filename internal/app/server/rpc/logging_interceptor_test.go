@@ -100,6 +100,13 @@ func TestLoggingInterceptor_UnauthenticatedError(t *testing.T) {
 	}
 }
 
+func TestLoggingInterceptor_AbortedError(t *testing.T) {
+	rec := callLogging(t, connect.NewError(connect.CodeAborted, errors.New("conflict")))
+	if rec.Level != slog.LevelWarn {
+		t.Errorf("level = %v, want Warn", rec.Level)
+	}
+}
+
 // isClientError must classify a raw *apperr.Error by its Code(), not via
 // connect.CodeOf (which returns Unknown for apperr — it has a Code field, not a
 // Code() method that satisfies Connect's coder interface). This keeps log levels

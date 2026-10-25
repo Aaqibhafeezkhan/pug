@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 
 	"buf.build/go/protovalidate"
@@ -15,6 +16,11 @@ import (
 	"github.com/pug-sh/pug/internal/slogx"
 	"google.golang.org/protobuf/proto"
 )
+
+// ErrBatchInProcess means a replicated stream has staged a batch with the same msg ID
+// but not stored it yet. A leader change can still drop it, so the client must retry.
+// Handlers should return CodeAborted.
+var ErrBatchInProcess = errors.New("an identical event batch is still in flight")
 
 // Publisher marshals events into an EventBatch and publishes to NATS.
 // Used by the RPC handler to enqueue SDK-submitted events for processing.
@@ -45,8 +51,13 @@ func (p *Publisher) Publish(ctx context.Context, projectID string, events []*eve
 		return err
 	}
 
-	if _, err = p.producer.Publish(ctx, nats.EventsIngestSubject, data, jetstream.WithMsgID(batchMsgID(projectID, events))); err != nil {
-		slog.ErrorContext(ctx, "failed to publish events to NATS", slogx.Error(err))
+	msgID := batchMsgID(projectID, events)
+	if _, err = p.producer.Publish(ctx, nats.EventsIngestSubject, data, jetstream.WithMsgID(msgID)); err != nil {
+		if nats.IsDuplicateInProcess(err) {
+			slog.WarnContext(ctx, "event batch is already being stored", slogx.Error(err), slog.String("msg_id", msgID))
+			return ErrBatchInProcess
+		}
+		slog.ErrorContext(ctx, "failed to publish events to NATS", slogx.Error(err), slog.String("msg_id", msgID))
 		telemetry.RecordError(ctx, err)
 		return err
 	}
