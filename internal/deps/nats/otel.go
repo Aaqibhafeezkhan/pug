@@ -62,7 +62,7 @@ func (t *tracedJetStream) Publish(ctx context.Context, subject string, data []by
 	injectTraceContext(ctx, msg)
 
 	ack, err := t.JetStream.PublishMsg(ctx, msg, opts...)
-	if err != nil {
+	if err != nil && !IsDuplicateInProcess(err) {
 		telemetry.RecordError(ctx, err)
 	}
 	return ack, err
@@ -78,7 +78,7 @@ func (t *tracedJetStream) PublishMsg(ctx context.Context, msg *nats.Msg, opts ..
 	injectTraceContext(ctx, msg)
 
 	ack, err := t.JetStream.PublishMsg(ctx, msg, opts...)
-	if err != nil {
+	if err != nil && !IsDuplicateInProcess(err) {
 		telemetry.RecordError(ctx, err)
 	}
 	return ack, err

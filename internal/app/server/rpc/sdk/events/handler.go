@@ -243,6 +243,9 @@ func (s *Server) BatchCreate(
 	s.enrichAttribution(ctx, projectID, events)
 
 	if err := s.publisher.Publish(ctx, principal.Project.ID, events); err != nil {
+		if errors.Is(err, coreevents.ErrBatchInProcess) {
+			return nil, connect.NewError(connect.CodeAborted, errors.New("an identical batch is still in flight; retry it"))
+		}
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to accept events"))
 	}
 	acceptedCounter.Add(ctx, int64(len(events)), metric.WithAttributes(attribute.String("auth", string(principal.AuthType))))

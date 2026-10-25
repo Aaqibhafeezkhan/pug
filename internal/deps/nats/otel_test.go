@@ -2,12 +2,14 @@ package nats
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -132,6 +134,40 @@ func TestStartProducerSpan(t *testing.T) {
 	}
 	if attrs["messaging.destination.name"] != "events.ingest" {
 		t.Errorf("messaging.destination.name = %v, want events.ingest", attrs["messaging.destination.name"])
+	}
+}
+
+type apiErrorJetStream struct {
+	jetstream.JetStream
+	code jetstream.ErrorCode
+}
+
+func (s apiErrorJetStream) PublishMsg(context.Context, *nats.Msg, ...jetstream.PublishOpt) (*jetstream.PubAck, error) {
+	return nil, fmt.Errorf("nats: %w", &jetstream.APIError{ErrorCode: s.code})
+}
+
+func TestTracedPublishSkipsDuplicateInProcess(t *testing.T) {
+	exporter, _ := setupOTel(t)
+
+	for _, tt := range []struct {
+		code jetstream.ErrorCode
+		want codes.Code
+	}{
+		{10158, codes.Unset},
+		{10077, codes.Error},
+	} {
+		exporter.Reset()
+		js := &tracedJetStream{apiErrorJetStream{code: tt.code}}
+		if _, err := js.Publish(context.Background(), "events.ingest", nil); err == nil {
+			t.Fatalf("err_code %d: Publish returned no error", tt.code)
+		}
+		spans := exporter.GetSpans()
+		if len(spans) != 1 {
+			t.Fatalf("err_code %d: got %d spans, want 1", tt.code, len(spans))
+		}
+		if got := spans[0].Status.Code; got != tt.want {
+			t.Errorf("err_code %d: span status = %v, want %v", tt.code, got, tt.want)
+		}
 	}
 }
 

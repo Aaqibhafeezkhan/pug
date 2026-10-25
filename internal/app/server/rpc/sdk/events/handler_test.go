@@ -1,11 +1,15 @@
 package events
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1219,5 +1223,62 @@ func TestBatchCreatePublishesAfterClientCancel(t *testing.T) {
 	}
 	if got := resp.Msg.GetAccepted(); got != 1 {
 		t.Errorf("accepted = %d, want 1", got)
+	}
+}
+
+type apiErrorJetStream struct {
+	jetstream.JetStream
+	err *jetstream.APIError
+}
+
+func (s apiErrorJetStream) Publish(context.Context, string, []byte, ...jetstream.PublishOpt) (*jetstream.PubAck, error) {
+	return nil, fmt.Errorf("nats: %w", s.err)
+}
+
+func TestBatchCreatePublishErrors(t *testing.T) {
+	for _, tt := range []struct {
+		name            string
+		err             *jetstream.APIError
+		wantCode        connect.Code
+		wantLog, notLog string
+	}{
+		{
+			name:     "identical batch in process",
+			err:      &jetstream.APIError{Code: 409, ErrorCode: 10158, Description: "duplicate message id is in process"},
+			wantCode: connect.CodeAborted,
+			wantLog:  `level=WARN msg="event batch is already being stored"`,
+			notLog:   "level=ERROR",
+		},
+		{
+			name:     "any other API error",
+			err:      &jetstream.APIError{Code: 503, ErrorCode: 10077, Description: "store failed"},
+			wantCode: connect.CodeInternal,
+			wantLog:  `level=ERROR msg="failed to publish events to NATS"`,
+			notLog:   "event batch is already being stored",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			s := &Server{publisher: coreevents.NewPublisher(apiErrorJetStream{err: tt.err}), geoProvider: stubProvider{}}
+			_, err := s.BatchCreate(ctxWithProject(context.Background()), connect.NewRequest(&eventsv1.BatchCreateRequest{
+				Events: []*eventsv1.Event{{
+					EventId:    proto.String(uuid.NewString()),
+					DistinctId: proto.String("u1"),
+					Kind:       proto.String("page_view"),
+					OccurTime:  timestamppb.Now(),
+					SessionId:  proto.String(uuid.NewString()),
+				}},
+			}))
+			if got := connect.CodeOf(err); got != tt.wantCode {
+				t.Errorf("code = %v, want %v (err: %v)", got, tt.wantCode, err)
+			}
+			if got := logs.String(); !strings.Contains(got, tt.wantLog) || strings.Contains(got, tt.notLog) {
+				t.Errorf("logs = %q, want %q and no %q", got, tt.wantLog, tt.notLog)
+			}
+		})
 	}
 }

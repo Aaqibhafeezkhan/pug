@@ -2,6 +2,7 @@ package nats
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -253,4 +254,14 @@ func (nc *NATSClient) GetStreamConfigByName(name string) (*StreamConfig, error) 
 func (nc *NATSClient) Publish(ctx context.Context, subject string, data []byte) error {
 	_, err := nc.jetStream.Publish(ctx, subject, data)
 	return err
+}
+
+// nats-server's JSStreamDuplicateMessageConflict; nats.go v1.54.0 has no constant for it.
+const errCodeDuplicateInProcess jetstream.ErrorCode = 10158
+
+// IsDuplicateInProcess reports a publish refused because a replicated stream has staged
+// a message with the same msg ID but not stored it yet: a retry signal, not a fault.
+func IsDuplicateInProcess(err error) bool {
+	apiErr, ok := errors.AsType[*jetstream.APIError](err)
+	return ok && apiErr.ErrorCode == errCodeDuplicateInProcess
 }

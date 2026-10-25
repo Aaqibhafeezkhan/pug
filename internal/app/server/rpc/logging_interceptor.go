@@ -95,12 +95,12 @@ func isClientError(err error) bool {
 		connect.CodeUnauthenticated,
 		connect.CodeFailedPrecondition,
 		connect.CodeOutOfRange,
-		connect.CodeCanceled:
+		connect.CodeCanceled,
+		connect.CodeAborted:
 		return true
 	case connect.CodeUnknown,
 		connect.CodeDeadlineExceeded,
 		connect.CodeResourceExhausted,
-		connect.CodeAborted,
 		connect.CodeUnimplemented,
 		connect.CodeInternal,
 		connect.CodeUnavailable,
