@@ -43,6 +43,9 @@ make infra
 ./bin/pug dev
 ```
 
+[`docs/development.md`](docs/development.md) covers the rest: seeding demo data
+and signing in as the demo org's admin.
+
 Environment variables are documented in [`.env.example`](.env.example). Deeper
 architecture notes live in [`docs/architecture/`](docs/architecture/), and
 conventions the codebase follows are in [`CLAUDE.md`](CLAUDE.md) — please skim it

@@ -102,6 +102,9 @@ make infra
 ./bin/pug dev
 ```
 
+[`docs/development.md`](docs/development.md) walks through each step, including
+signing in as the demo org's admin.
+
 Environment variables are documented in [`.env.example`](.env.example).
 Google and generic OIDC sign-in are documented in
 [`docs/authentication.md`](docs/authentication.md), with a ready-to-copy
