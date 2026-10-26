@@ -24,10 +24,8 @@ make infra-down
 # OTLP collector + HyperDX (optional; for telemetry export)
 make clickstack
 
-# Run database migrations
-./bin/pug postgres migrate
-./bin/pug nats migrate
-./bin/pug clickhouse migrate
+# Run database migrations (Postgres, NATS, ClickHouse; per-store: pug postgres|nats|clickhouse migrate)
+./bin/pug migrate
 
 # Seed the demo project for local dev. Resets Postgres + ClickHouse (pass
 # --no-reset to keep the schema and truncate the demo tables instead), then runs
