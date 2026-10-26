@@ -87,6 +87,31 @@ func runMigrate(up, down func(ctx context.Context, num int) error) func(cmd *cob
 	}
 }
 
+// migrateStep is one store's migrate, as run by `pug migrate`.
+type migrateStep struct {
+	name string
+	run  func(ctx context.Context) error
+}
+
+// migrateAllSteps is the order `pug migrate` applies the stores in. It only migrates up: NATS has
+// no down, so rolling back stays with the per-store commands.
+var migrateAllSteps = []migrateStep{
+	{name: "postgres", run: func(ctx context.Context) error { return postgres.Up(ctx, 0) }},
+	{name: "nats", run: migratenats.Run},
+	{name: "clickhouse", run: func(ctx context.Context) error { return clickhouse.Up(ctx, 0) }},
+}
+
+// runMigrateSteps runs the steps in order and stops at the first one that fails.
+func runMigrateSteps(ctx context.Context, steps []migrateStep) error {
+	for _, step := range steps {
+		slog.InfoContext(ctx, "migrating", slog.String("store", step.name))
+		if err := step.run(ctx); err != nil {
+			return fmt.Errorf("migrate %s: %w", step.name, err)
+		}
+	}
+	return nil
+}
+
 func emailDevStatus() (bool, string) {
 	if os.Getenv("PUG_DASHBOARD_BASE_URL") == "" {
 		return false, "disabled (missing PUG_DASHBOARD_BASE_URL)"
@@ -353,6 +378,15 @@ var devCmd = &cobra.Command{
 	},
 }
 
+var migrateCmd = &cobra.Command{
+	Use:   "migrate",
+	Short: "Run the Postgres and ClickHouse migrations and create the NATS streams",
+	Long: "Runs `pug postgres migrate`, `pug nats migrate` and `pug clickhouse migrate` in that order,\n" +
+		"migrating up, and stops at the first one that fails. Use the per-store commands to roll back.",
+	Args: cobra.NoArgs,
+	Run:  run(func(ctx context.Context) error { return runMigrateSteps(ctx, migrateAllSteps) }),
+}
+
 var postgresMigrateCmd = &cobra.Command{
 	Use:   "migrate",
 	Short: "Run database migrations for postgres",
@@ -418,6 +452,7 @@ func init() {
 	rootCmd.AddCommand(serverCmd)
 	rootCmd.AddCommand(workerCmd)
 	rootCmd.AddCommand(devCmd)
+	rootCmd.AddCommand(migrateCmd)
 
 	seedCmd.Flags().Int64P("count", "c", 500_000, "total number of events to generate")
 	seedCmd.Flags().IntP("batch", "b", 10_000, "number of events per ClickHouse batch")

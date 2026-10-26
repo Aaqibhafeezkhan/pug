@@ -129,3 +129,53 @@ func TestRenderEmailPreviewUnknownKind(t *testing.T) {
 		t.Fatal("expected error for unknown kind")
 	}
 }
+
+func TestRunMigrateSteps(t *testing.T) {
+	var ran []string
+	step := func(name string, err error) migrateStep {
+		return migrateStep{name: name, run: func(context.Context) error {
+			ran = append(ran, name)
+			return err
+		}}
+	}
+
+	t.Run("runs every step in order", func(t *testing.T) {
+		ran = nil
+		err := runMigrateSteps(context.Background(), []migrateStep{
+			step("postgres", nil), step("nats", nil), step("clickhouse", nil),
+		})
+		if err != nil {
+			t.Fatalf("err = %v, want nil", err)
+		}
+		if got := strings.Join(ran, ","); got != "postgres,nats,clickhouse" {
+			t.Fatalf("ran = %s, want postgres,nats,clickhouse", got)
+		}
+	})
+
+	t.Run("stops at the first failure and names the step", func(t *testing.T) {
+		ran = nil
+		boom := errors.New("connection refused")
+		err := runMigrateSteps(context.Background(), []migrateStep{
+			step("postgres", nil), step("nats", boom), step("clickhouse", nil),
+		})
+		if !errors.Is(err, boom) {
+			t.Fatalf("err = %v, want it to wrap %v", err, boom)
+		}
+		if !strings.Contains(err.Error(), "nats") {
+			t.Fatalf("err = %q, want it to name the nats step", err)
+		}
+		if got := strings.Join(ran, ","); got != "postgres,nats" {
+			t.Fatalf("ran = %s, want postgres,nats (clickhouse must not run)", got)
+		}
+	})
+}
+
+func TestMigrateAllStepsOrder(t *testing.T) {
+	var names []string
+	for _, s := range migrateAllSteps {
+		names = append(names, s.name)
+	}
+	if got := strings.Join(names, ","); got != "postgres,nats,clickhouse" {
+		t.Fatalf("migrateAllSteps = %s, want postgres,nats,clickhouse", got)
+	}
+}

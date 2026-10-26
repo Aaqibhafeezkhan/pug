@@ -47,14 +47,15 @@ make infra
 
 ```bash
 make build
-./bin/pug postgres migrate
-./bin/pug nats migrate
-./bin/pug clickhouse migrate
+./bin/pug migrate
 ```
 
-Each command is safe to re-run. Run all three again after you pull new
-migrations. `pug nats migrate` creates the streams the workers read from, so
-don't skip it.
+`pug migrate` runs the Postgres, NATS and ClickHouse migrations in that order
+and stops at the first one that fails. It is safe to re-run; run it again after
+you pull new migrations. It includes the NATS step that creates the streams the
+workers read from. To migrate one store, or to roll back, use
+`pug postgres migrate`, `pug nats migrate` or `pug clickhouse migrate`
+(`--direction down` for the two databases; NATS has no down).
 
 ## 4. Seed demo data and the admin
 
