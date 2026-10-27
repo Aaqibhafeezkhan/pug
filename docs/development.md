@@ -53,9 +53,14 @@ make build
 `pug migrate` runs the Postgres, NATS and ClickHouse migrations in that order
 and stops at the first one that fails. It is safe to re-run; run it again after
 you pull new migrations. It includes the NATS step that creates the streams the
-workers read from. To migrate one store, or to roll back, use
-`pug postgres migrate`, `pug nats migrate` or `pug clickhouse migrate`
-(`--direction down` for the two databases; NATS has no down).
+workers read from.
+
+To migrate one store, use `pug postgres migrate`, `pug nats migrate` or
+`pug clickhouse migrate`. To roll back the last Postgres or ClickHouse
+migration, add `--direction down --num 1`. NATS has no down.
+
+> **`--direction down` without `--num` rolls back every migration.** It drops
+> every table in the database, with no prompt.
 
 ## 4. Seed demo data and the admin
 

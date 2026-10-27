@@ -10,10 +10,8 @@ import (
 	natsdeps "github.com/pug-sh/pug/internal/deps/nats"
 )
 
-// TODO: For self-hosting, move stream/consumer initialization to app startup instead of a
-// separate migrate command. This reduces setup friction — users currently need JetStream
-// enabled with specific storage limits, and the 50GB-per-stream defaults break local setups.
-// Consider: auto-create on startup, unified `pug migrate` for all DBs, env-aware defaults.
+// TODO: For self-hosting, consider creating streams and consumers at app startup instead of
+// in a separate migrate step.
 
 type initializer struct {
 	client *natsdeps.NATSClient

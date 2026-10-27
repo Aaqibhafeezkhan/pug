@@ -34,10 +34,8 @@ make build
 # Start dev infrastructure (PostgreSQL, ClickHouse, NATS)
 make infra
 
-# Run migrations
-./bin/pug postgres migrate
-./bin/pug nats migrate
-./bin/pug clickhouse migrate
+# Run migrations (Postgres, NATS, ClickHouse)
+./bin/pug migrate
 
 # Start the dev server + workers together
 ./bin/pug dev

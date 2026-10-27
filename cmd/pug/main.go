@@ -380,7 +380,7 @@ var devCmd = &cobra.Command{
 
 var migrateCmd = &cobra.Command{
 	Use:   "migrate",
-	Short: "Run the Postgres and ClickHouse migrations and create the NATS streams",
+	Short: "Run the Postgres, NATS and ClickHouse migrations",
 	Long: "Runs `pug postgres migrate`, `pug nats migrate` and `pug clickhouse migrate` in that order,\n" +
 		"migrating up, and stops at the first one that fails. Use the per-store commands to roll back.",
 	Args: cobra.NoArgs,
