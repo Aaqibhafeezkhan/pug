@@ -89,10 +89,8 @@ make build
 # Start dev infrastructure (PostgreSQL, NATS, ClickHouse)
 make infra
 
-# Run migrations
-./bin/pug postgres migrate
-./bin/pug nats migrate
-./bin/pug clickhouse migrate
+# Run migrations (Postgres, NATS, ClickHouse)
+./bin/pug migrate
 
 # Seed the demo project with events, profiles, and dashboards
 # (resets the local Postgres and ClickHouse databases; see "Demo data" below)
