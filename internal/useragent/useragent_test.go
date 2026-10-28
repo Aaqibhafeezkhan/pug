@@ -2,6 +2,7 @@ package useragent
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -264,6 +265,32 @@ func TestParse(t *testing.T) {
 				PropBrowser:        "curl",
 				PropBrowserVersion: "8",
 				PropMobile:         "false",
+			},
+		},
+		{
+			name: "token ending at the length cap: parsed",
+			ua:   strings.Repeat("x", maxUALen-len(" Firefox/120.0")) + " Firefox/120.0",
+			want: Properties{
+				PropBrowser:        "Firefox",
+				PropBrowserVersion: "120",
+				PropMobile:         "false",
+			},
+		},
+		{
+			name: "token past the length cap: ignored",
+			ua:   strings.Repeat("x", maxUALen) + " Firefox/120.0",
+			want: nil,
+		},
+		{
+			name: "invalid UTF-8 byte: stripped",
+			ua:   "Mozilla/5.0 (Linux; Android 14; Pixel\xff 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+			want: Properties{
+				PropBrowser:        "Google Chrome",
+				PropBrowserVersion: "120",
+				PropOS:             "Android",
+				PropOSVersion:      "14",
+				PropDevice:         "Pixel 8",
+				PropMobile:         "true",
 			},
 		},
 	}

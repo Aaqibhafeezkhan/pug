@@ -3,6 +3,7 @@ package useragent
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	uaparser "github.com/ua-parser/uap-go/uaparser"
 )
@@ -16,6 +17,10 @@ const (
 	PropDevice         = "$device"
 	PropMobile         = "$mobile"
 )
+
+// maxUALen bounds the parse: uap-go runs hundreds of regexps over the whole
+// string on every cache miss, so its cost grows with the User-Agent's length.
+const maxUALen = 2048
 
 // Properties is a set of user-agent properties resolved for a request.
 type Properties map[string]string
@@ -51,5 +56,10 @@ func (p *Parser) Parse(h http.Header) Properties {
 	if uaStr == "" {
 		return nil
 	}
+	if len(uaStr) > maxUALen {
+		// A copy, or uap-go's cache keeps the whole header alive through the substring.
+		uaStr = strings.Clone(uaStr[:maxUALen])
+	}
+	uaStr = strings.ToValidUTF8(uaStr, "")
 	return propertiesFromUAParser(p.parser.Parse(uaStr), uaStr)
 }
