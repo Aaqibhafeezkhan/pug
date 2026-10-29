@@ -1,0 +1,3 @@
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+reason = "Every x/crypto version ships openpgp and nothing in pug imports it; lint (SA1019) fails on an import of it, govulncheck on a reachable call."
