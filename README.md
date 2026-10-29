@@ -80,6 +80,13 @@ Built in Go on PostgreSQL, ClickHouse, and NATS.
 - **ClickHouse**: analytical store for events, insights, and profiles
 - **NATS**: messaging backbone for the ingestion and worker pipelines
 
+## Self-hosting
+
+See the [self-hosting guide](https://docs.pug.sh/self-hosting/). A Pug
+instance is this repo's backend, published as container images on
+`ghcr.io/pug-sh`, plus the dashboard from
+[`pug-sh/app`](https://github.com/pug-sh/app), served as static files.
+
 ## Quick start
 
 ```bash
