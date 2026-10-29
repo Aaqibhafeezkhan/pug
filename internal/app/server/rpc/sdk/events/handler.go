@@ -78,7 +78,7 @@ func init() {
 	)
 	botTaggedCounter, _ = meter.Int64Counter(
 		"events.bot_tagged_total",
-		metric.WithDescription("Events tagged $bot=true at ingest. signal=user_agent: the User-Agent matched the crawler-user-agents list ($bot_reason is the crawler's name, e.g. HeadlessChrome). signal=asn: X-Pug-ASN named a datacenter-only network ($bot_reason=asn:<n>). Only $platform=web events on public-key requests are ever tagged; nothing is dropped."),
+		metric.WithDescription("Events tagged $bot=true at ingest. signal=user_agent: the User-Agent matched the crawler-user-agents list ($bot_reason is the crawler's name, e.g. HeadlessChrome). signal=asn: X-Pug-ASN named a datacenter-only network ($bot_reason=asn:<n>). signal=screen: the event reported headless Chrome's default 800x600 screen ($bot_reason=screen:800x600). Only $platform=web events on public-key requests are ever tagged; nothing is dropped."),
 	)
 	acceptedCounter, _ = meter.Int64Counter(
 		"events.accepted_total",
@@ -706,7 +706,7 @@ func (s *Server) enrichBot(ctx context.Context, projectID string, authType rpc.A
 		reason, ok = datacenterReason(ctx, projectID, h, len(events))
 	}
 	if !ok {
-		return
+		signal = "screen"
 	}
 
 	tagged := 0
@@ -714,11 +714,18 @@ func (s *Server) enrichBot(ctx context.Context, projectID string, authType rpc.A
 		if autoPropString(event.AutoProperties, autoprop.PropPlatform) != autoprop.PlatformWeb {
 			continue
 		}
+		eventReason, tag := reason, ok
+		if !tag {
+			eventReason, tag = botdetect.MatchScreen(eventProps(event.AutoProperties).ScreenDims())
+		}
+		if !tag {
+			continue
+		}
 		event.AutoProperties[autoprop.PropBot] = &commonv1.PropertyValue{
 			Value: &commonv1.PropertyValue_BoolValue{BoolValue: true},
 		}
 		event.AutoProperties[autoprop.PropBotReason] = &commonv1.PropertyValue{
-			Value: &commonv1.PropertyValue_StringValue{StringValue: reason},
+			Value: &commonv1.PropertyValue_StringValue{StringValue: eventReason},
 		}
 		tagged++
 	}

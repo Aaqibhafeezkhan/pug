@@ -1,7 +1,8 @@
 // Package botdetect recognises automated visitors that run the browser SDK —
 // headless browsers, synthetic monitors, scrapers on cloud IPs — from what the
-// server can see: the User-Agent and the origin network. Rationale, false
-// positives and the tag-don't-drop policy: docs/architecture/bot-detection.md.
+// server can see: the User-Agent, the origin network and the reported screen.
+// Rationale, false positives and the tag-don't-drop policy:
+// docs/architecture/bot-detection.md.
 package botdetect
 
 import (
@@ -82,4 +83,14 @@ func MatchASN(asn uint64) (string, bool) {
 		return "", false
 	}
 	return "asn:" + strconv.FormatUint(asn, 10), true
+}
+
+// MatchScreen returns "screen:800x600" for headless Chrome's default screen,
+// which real visitors almost never report. Playwright's 1280x720 stays off: a
+// 1080p laptop at 150% scaling reports it too.
+func MatchScreen(width, height int64) (string, bool) {
+	if width != 800 || height != 600 {
+		return "", false
+	}
+	return "screen:800x600", true
 }

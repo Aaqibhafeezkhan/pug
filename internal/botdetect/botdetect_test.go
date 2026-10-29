@@ -76,3 +76,22 @@ func TestMatchASN(t *testing.T) {
 		}
 	}
 }
+
+func TestMatchScreen(t *testing.T) {
+	cases := []struct {
+		width, height int64
+		want          string
+	}{
+		{800, 600, "screen:800x600"},
+		{600, 800, ""},
+		{1280, 720, ""},
+		{1920, 1080, ""},
+		{0, 0, ""},
+	}
+	for _, c := range cases {
+		got, ok := MatchScreen(c.width, c.height)
+		if ok != (c.want != "") || got != c.want {
+			t.Errorf("MatchScreen(%d, %d) = %q, %v; want %q", c.width, c.height, got, ok, c.want)
+		}
+	}
+}

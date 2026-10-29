@@ -1017,6 +1017,8 @@ func TestEnrichAttribution(t *testing.T) {
 
 const headlessChromeUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/120.0.0.0 Safari/537.36"
 
+var headlessScreen = map[string]string{"$screenWidth": "800", "$screenHeight": "600"}
+
 func webEvent(extra map[string]string) *eventsv1.Event {
 	m := map[string]string{autoprop.PropPlatform: autoprop.PlatformWeb}
 	maps.Copy(m, extra)
@@ -1041,6 +1043,26 @@ func TestEnrichBot(t *testing.T) {
 			name: "user agent wins over asn", ua: headlessChromeUA, asn: "24940", authType: pub,
 			events: []*eventsv1.Event{webEvent(nil)},
 			want:   []string{"HeadlessChrome"},
+		},
+		{
+			name: "headless screen tags only that event", ua: chromeWindowsUA, asn: "7922", authType: pub,
+			events: []*eventsv1.Event{webEvent(headlessScreen), webEvent(map[string]string{"$screenWidth": "1920", "$screenHeight": "1080"})},
+			want:   []string{"screen:800x600", ""},
+		},
+		{
+			name: "asn wins over screen", ua: chromeWindowsUA, asn: "24940", authType: pub,
+			events: []*eventsv1.Event{webEvent(headlessScreen)},
+			want:   []string{"asn:24940"},
+		},
+		{
+			name: "headless screen on a non-web event", ua: chromeWindowsUA, authType: pub,
+			events: []*eventsv1.Event{{AutoProperties: propMap(map[string]string{autoprop.PropPlatform: "android", "$screenWidth": "800", "$screenHeight": "600"})}},
+			want:   []string{""},
+		},
+		{
+			name: "headless screen on a private key", ua: chromeWindowsUA, authType: prv,
+			events: []*eventsv1.Event{webEvent(headlessScreen)},
+			want:   []string{""},
 		},
 		{
 			name: "datacenter asn", ua: chromeWindowsUA, asn: "24940", authType: pub,
