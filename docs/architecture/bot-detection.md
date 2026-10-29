@@ -2,10 +2,12 @@
 
 > **Status: TAGGING AND TOGGLE BUILT.** Written 2026-08-29; migration 012,
 > `internal/botdetect`, `enrichBot` and the `include_bots` toggle
-> (`internal/core/insights/bot.go`) were built the same day. Still to do: the
-> Cloudflare Transform Rule that turns signal 2 on, the FE control for the
-> toggle, the SDK check. One thing changed in implementation and is marked
-> **Amended** below: the signals are scoped to browser traffic.
+> (`internal/core/insights/bot.go`) were built the same day. The FE toggle
+> shipped 2026-08-30, the SDK check as the opt-in `excludeAutomatedBrowsers`,
+> and the Cloudflare Transform Rule that turns signal 2 on is live since
+> 2026-10-22. Signal 4 was added 2026-10-29. One thing changed in
+> implementation and is marked **Amended** below: the signals are scoped to
+> browser traffic.
 
 ## The problem
 
@@ -27,11 +29,11 @@ Enterprise add-on we will not buy, so both columns are empty and nothing filters
 on them. They stay as they are; their meaning ("Cloudflare's score", "a
 known-good bot") is not what this design records.
 
-## Design: three signals, one tag, one toggle
+## Design: four signals, one tag, one toggle
 
-Two server-side signals (the user agent, the origin network) and one in the
-browser. The server *tags*, never drops, what it finds, so a project owner
-can include or exclude the traffic per query.
+Three server-side signals (the user agent, the origin network, the screen
+size) and one in the browser. The server *tags*, never drops, what it finds, so
+a project owner can include or exclude the traffic per query.
 
 ### Signal 1: user-agent list (server)
 
@@ -91,17 +93,35 @@ cloud", not all of it, and that is fine.
 
 ### Signal 3: automation flag (browser SDK)
 
-In `@pug-sh/browser` (the `sdk-web` repo): if `navigator.webdriver` is true, or
+In `@pug-sh/browser` (the `sdk-web` repo), behind the opt-in
+`excludeAutomatedBrowsers` (default off): if `navigator.webdriver` is true, or
 the user agent / `navigator.userAgentData.brands` contains `HeadlessChrome`,
 don't send at all. It costs nothing, stops Playwright/Puppeteer/Selenium before
 they use any ingest or metered quota, and a bot that hides it is caught by
-signal 1 or 2 if it can be caught at all. Not sending (rather than tagging) is
+signal 1, 2 or 4 if it can be caught at all. Not sending (rather than tagging) is
 deliberate: a client-sent "I am a bot" flag can't be trusted anyway, and nobody
 has asked to analyse their own automation traffic.
 
+### Signal 4: headless screen (server)
+
+Added 2026-10-29. A bot can drive a real Chrome, hide `navigator.webdriver`,
+send a normal user agent and rotate through residential proxies. That passes
+signals 1 to 3. One such bot faked a referrer on pug.sh for days, untagged. It
+still reported headless Chrome's default screen, 800x600, on every event.
+
+So `enrichBot` also tags a web event whose `$screenWidth` x `$screenHeight` is
+exactly 800x600, with `bot_reason` = `screen:800x600`. It runs per event, since
+the screen travels on each event, and only when signals 1 and 2 found nothing.
+
+Checked on prod before shipping: about two thirds of 800x600 sessions were
+already tagged by signals 1 and 2, and none of the rest looked human (mostly one
+page, en-US, often a Mac, an iPhone or a 2015 browser). Other headless defaults
+stay off: Playwright's 1280x720 is also what a 1080p laptop at 150% scaling
+reports.
+
 ### Amended: which traffic the signals apply to
 
-Both server signals run only on **public-key requests**, and within those tag
+The server signals run only on **public-key requests**, and within those tag
 only events with **`$platform = web`**. The crawler list also names HTTP-client
 libraries (`okhttp` and `Go-http-client` are exactly what the React Native
 (Android) and Go SDKs send, neither setting a User-Agent of its own; the Node
@@ -115,15 +135,14 @@ bot that runs the web SDK cannot avoid `$platform = web`: the SDK re-asserts it.
 Two promoted columns on `events` (migration 012), written by `enrichBot` right
 after `enrichUserAgent` in the chain: `bot Bool DEFAULT false` and
 `bot_reason LowCardinality(String) DEFAULT ''`, the crawler's name
-(`HeadlessChrome`, `Googlebot`, …) or `asn:24940`; the user-agent wins
-when both signals fire. Both are server-only auto-properties (`$bot`,
-`$bot_reason`): a client-sent value is stripped before enrichment, like
-`$referrerDomain`. `$bot_reason` is a promoted string column, so the filter
-picker lists it and a dashboard can already break down by it. The counter
-`events.bot_tagged_total{project_id, signal}` counts tagged events by signal
-(`user_agent` / `asn`); an
-unparseable `X-Pug-ASN` counts on `events.cdn_header_parse_failed_total`. Nothing
-is dropped.
+(`HeadlessChrome`, `Googlebot`, …), `asn:24940` or `screen:800x600`; when
+several fire, the user agent wins, then the network. Both are server-only
+auto-properties (`$bot`, `$bot_reason`): a client-sent value is stripped before
+enrichment, like `$referrerDomain`. `$bot_reason` is a promoted string column,
+so the filter picker lists it and a dashboard can already break down by it. The
+counter `events.bot_tagged_total{project_id, signal}` counts tagged events by
+signal (`user_agent` / `asn` / `screen`); an unparseable `X-Pug-ASN` counts on
+`events.cdn_header_parse_failed_total`. Nothing is dropped.
 
 ### Query toggle
 
@@ -192,7 +211,8 @@ tagged id is still discoverable and erasable. Pinned by
 ## What it misses, and what it gets wrong
 
 **Misses:** automation using a normal Chrome user agent from a residential or
-mobile IP; bot networks doing exactly this exist. No free signal catches it.
+mobile IP; bot networks doing exactly this exist. Signal 4 catches it only
+while it keeps the default 800x600 screen.
 
 **False positives:** people on a VPN or Tailscale exit node hosted in
 Hetzner/DigitalOcean/AWS, corporate proxies on Azure/AWS, Windows 365 or AWS
@@ -212,15 +232,16 @@ not a smaller global one.
    the DLQ while SDKs still see 200 (see web-analytics.md's deploy runbook).
 2. ✅ Server: the dependency, `datacenterASNs`, `enrichBot`, the two
    auto-properties, the counter. Tagging starts; queries unchanged until step 4.
-3. Cloudflare: the Transform Rule. Signal 2 goes live by itself.
+3. ✅ Cloudflare: the Transform Rule. Signal 2 goes live by itself.
 4. ✅ API: `include_bots` and its predicate on the raw and rollup paths, in
    insights and then on the four `shared.activity` event reads plus
    `shared.profiles` (migration 013). This is the one
    step where dashboards change (the default applies at this deploy with no
    FE change), worth a release note. `proto/shared` is private-key or JWT, so
    external API consumers and the MCP tools change with it.
-5. FE: the toggle control, so a project owner can see the tagged traffic.
-6. SDK: the webdriver check, on the SDK's own release cadence.
+5. ✅ FE: the toggle control, so a project owner can see the tagged traffic.
+6. ✅ SDK: the webdriver check, on the SDK's own release cadence.
+7. ✅ Server: signal 4, the headless screen (2026-10-29).
 
 ## Later, separately: hostname allowlist
 
