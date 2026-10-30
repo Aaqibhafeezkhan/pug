@@ -48,7 +48,7 @@ func TestIdentify_RejectsCookielessAnonymousID(t *testing.T) {
 //
 // The concrete failure it allows: a tenant whose external_id is user-supplied (a
 // username, not an email) lets someone register as "cookieless-x". Identify
-// succeeds, and post-identify events are keyed by external_id — so every later
+// succeeds, and post-identify events are keyed by external_id, so every later
 // BatchCreate carrying that user trips the reserved-prefix rule. Because that CEL
 // is `this.events.all(...)`, the WHOLE batch is rejected, taking unrelated users'
 // events down with it on a server-side SDK.
@@ -58,7 +58,7 @@ func TestIdentify_RejectsCookielessExternalID(t *testing.T) {
 	}
 	err := protovalidate.Validate(req)
 	if err == nil {
-		t.Fatal("cookieless- external_id must fail validation — the prefix is server-reserved")
+		t.Fatal("cookieless- external_id must fail validation: the prefix is server-reserved")
 	}
 	if !strings.Contains(err.Error(), "external_id") {
 		t.Errorf("violation should name external_id, got: %v", err)
@@ -71,6 +71,19 @@ func TestIdentify_RejectsCookielessExternalID(t *testing.T) {
 		if err := protovalidate.Validate(ok); err != nil {
 			t.Errorf("external_id %q must remain valid: %v", id, err)
 		}
+	}
+}
+
+// `required` only checks presence under editions, so an explicit "" needs min_len.
+// Without it the identify is accepted, then the worker's own min_len rejects it and
+// it dead-letters while the caller was told it succeeded.
+func TestIdentify_RejectsEmptyExternalID(t *testing.T) {
+	err := protovalidate.Validate(&sdkprofilesv1.IdentifyRequest{ExternalId: proto.String("")})
+	if err == nil {
+		t.Fatal("empty external_id must fail validation")
+	}
+	if !strings.Contains(err.Error(), "external_id") {
+		t.Errorf("violation should name external_id, got: %v", err)
 	}
 }
 
@@ -93,6 +106,7 @@ func TestBatchIdentifyRequest_Validation(t *testing.T) {
 		{"1000 items", full, ""},
 		{"1001 items", append(slices.Clone(full), item("user-x", "")), "identifies"},
 		{"cookieless external id", []*sdkprofilesv1.IdentifyRequest{item("user-1", ""), item(cookieless.IDPrefix+"abc", "")}, "external_id"},
+		{"empty external id", []*sdkprofilesv1.IdentifyRequest{item("user-1", ""), item("", "")}, "external_id"},
 		{"bad anonymous id", []*sdkprofilesv1.IdentifyRequest{item("user-1", "nope")}, "anonymous_id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

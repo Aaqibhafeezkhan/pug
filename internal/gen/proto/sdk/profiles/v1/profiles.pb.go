@@ -30,17 +30,17 @@ type IdentifyRequest struct {
 	// reserved-prefix rule on BatchCreateRequest.distinct_id already refuses them
 	// from clients. external_id needs the same guard because post-identify events
 	// are keyed by external_id, so an id accepted here comes back as a distinct_id
-	// that the batch rule then rejects — and because that rule is `all()`, one such
+	// that the batch rule then rejects, and because that rule is `all()`, one such
 	// user fails the WHOLE batch, taking unrelated users' events with it.
 	ExternalId *string `protobuf:"bytes,1,opt,name=external_id,json=externalId" json:"external_id,omitempty"`
-	// Profile properties — shallow-merged into existing properties. On key conflict,
+	// Profile properties, shallow-merged into existing properties. On key conflict,
 	// these values take precedence over previously stored values.
 	Traits *structpb.Struct `protobuf:"bytes,2,opt,name=traits" json:"traits,omitempty"`
 	// The SDK-generated anonymous ID. The SDK should send this on first identify
 	// to trigger merge-and-soft-delete of the anonymous profile. Must start with "anon-".
 	AnonymousId *string `protobuf:"bytes,3,opt,name=anonymous_id,json=anonymousId" json:"anonymous_id,omitempty"`
 	// The device to assign to this profile. The SDK should send this on first
-	// identify and on account switch (external_id changed) — not on every call,
+	// identify and on account switch (external_id changed), not on every call,
 	// to avoid unnecessary DB writes. Omit for web SDKs without push support.
 	DeviceId      *string `protobuf:"bytes,4,opt,name=device_id,json=deviceId" json:"device_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -189,7 +189,7 @@ func (x *BatchIdentifyRequest) GetIdentifies() []*IdentifyRequest {
 
 type BatchIdentifyResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Identifies published for the worker; on success, the number sent.
+	// Identifies queued for the worker, not yet applied.
 	Accepted      *uint32 `protobuf:"varint,1,opt,name=accepted" json:"accepted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -317,10 +317,10 @@ var File_sdk_profiles_v1_profiles_proto protoreflect.FileDescriptor
 
 const file_sdk_profiles_v1_profiles_proto_rawDesc = "" +
 	"\n" +
-	"\x1esdk/profiles/v1/profiles.proto\x12\x0fsdk.profiles.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xd1\x02\n" +
-	"\x0fIdentifyRequest\x12\xae\x01\n" +
-	"\vexternal_id\x18\x01 \x01(\tB\x8c\x01\xbaH\x88\x01\xba\x01\x81\x01\n" +
-	"\x1bexternal_id.reserved_prefix\x12Aexternal_id must not start with the reserved 'cookieless-' prefix\x1a\x1f!this.startsWith('cookieless-')\xc8\x01\x01R\n" +
+	"\x1esdk/profiles/v1/profiles.proto\x12\x0fsdk.profiles.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xd5\x02\n" +
+	"\x0fIdentifyRequest\x12\xb2\x01\n" +
+	"\vexternal_id\x18\x01 \x01(\tB\x90\x01\xbaH\x8c\x01\xba\x01\x81\x01\n" +
+	"\x1bexternal_id.reserved_prefix\x12Aexternal_id must not start with the reserved 'cookieless-' prefix\x1a\x1f!this.startsWith('cookieless-')\xc8\x01\x01r\x02\x10\x01R\n" +
 	"externalId\x12/\n" +
 	"\x06traits\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x06traits\x126\n" +
 	"\fanonymous_id\x18\x03 \x01(\tB\x13\xbaH\x10r\x0e\x18\xff\x012\t^$|^anon-R\vanonymousId\x12$\n" +
