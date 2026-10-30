@@ -1,6 +1,8 @@
 package profiles
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -69,5 +71,40 @@ func TestIdentify_RejectsCookielessExternalID(t *testing.T) {
 		if err := protovalidate.Validate(ok); err != nil {
 			t.Errorf("external_id %q must remain valid: %v", id, err)
 		}
+	}
+}
+
+// BatchIdentify items carry every Identify rule: protovalidate validates each
+// element of a repeated message field, so one bad item fails the whole batch.
+func TestBatchIdentifyRequest_Validation(t *testing.T) {
+	item := func(externalID, anonymousID string) *sdkprofilesv1.IdentifyRequest {
+		return &sdkprofilesv1.IdentifyRequest{ExternalId: proto.String(externalID), AnonymousId: proto.String(anonymousID)}
+	}
+	full := make([]*sdkprofilesv1.IdentifyRequest, 1000)
+	for i := range full {
+		full[i] = item(fmt.Sprintf("user-%d", i), "")
+	}
+	for _, tc := range []struct {
+		name    string
+		items   []*sdkprofilesv1.IdentifyRequest
+		wantErr string // "" means valid
+	}{
+		{"empty", nil, ""},
+		{"1000 items", full, ""},
+		{"1001 items", append(slices.Clone(full), item("user-x", "")), "identifies"},
+		{"cookieless external id", []*sdkprofilesv1.IdentifyRequest{item("user-1", ""), item(cookieless.IDPrefix+"abc", "")}, "external_id"},
+		{"bad anonymous id", []*sdkprofilesv1.IdentifyRequest{item("user-1", "nope")}, "anonymous_id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := protovalidate.Validate(&sdkprofilesv1.BatchIdentifyRequest{Identifies: tc.items})
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Errorf("want valid, got: %v", err)
+			case tc.wantErr != "" && err == nil:
+				t.Errorf("want a violation naming %s, got none", tc.wantErr)
+			case tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr):
+				t.Errorf("violation should name %s, got: %v", tc.wantErr, err)
+			}
+		})
 	}
 }

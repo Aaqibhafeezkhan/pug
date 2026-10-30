@@ -586,6 +586,7 @@ func TestSelfWriteRPCs(t *testing.T) {
 		"/dashboard.customers.v1.CustomersService/GetMe":       false,
 		"/dashboard.customers.v1.CustomersService/SetPassword": true,
 		"/sdk.profiles.v1.ProfilesSDKService/Identify":         false,
+		"/sdk.profiles.v1.ProfilesSDKService/BatchIdentify":    false,
 		"/sdk.events.v1.EventsService/BatchCreate":             false,
 	}
 

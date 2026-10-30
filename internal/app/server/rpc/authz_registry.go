@@ -122,7 +122,8 @@ var permissionRegistry = map[string]authzspec.Spec{
 	"/shared.profiles.v1.ProfilesService/DeleteDataSubject":  authzspec.ProjGated(authz.ResourceProfile, authz.ActionDelete, "GDPR/DPDP erasure; member+ on the JWT path, coarse on private key"),
 
 	// --- sdk.profiles.v1.ProfilesSDKService ---
-	"/sdk.profiles.v1.ProfilesSDKService/Identify": authzspec.SDKKey(),
+	"/sdk.profiles.v1.ProfilesSDKService/Identify":      authzspec.SDKKey(),
+	"/sdk.profiles.v1.ProfilesSDKService/BatchIdentify": authzspec.SDKKey(),
 
 	// --- sdk.events.v1.EventsService ---
 	"/sdk.events.v1.EventsService/BatchCreate": authzspec.SDKKey(),
