@@ -224,6 +224,7 @@ var cronPurgeCmd = &cobra.Command{
 var cronExpiredTokensCmd = &cobra.Command{
 	Use:   "expired-tokens",
 	Short: "Delete expired refresh and email-action tokens",
+	Args:  cobra.NoArgs,
 	Run:   run(expiredtokenscron.Run),
 }
 
