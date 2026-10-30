@@ -10,9 +10,9 @@ import (
 	"strings"
 	"syscall"
 
+	expiredtokenscron "github.com/pug-sh/pug/internal/app/cron/expiredtokens"
 	purgecron "github.com/pug-sh/pug/internal/app/cron/purge"
 	retentioncron "github.com/pug-sh/pug/internal/app/cron/retention"
-	expiredtokenscron "github.com/pug-sh/pug/internal/app/cron/expiredtokens"
 	usagecron "github.com/pug-sh/pug/internal/app/cron/usage"
 	"github.com/pug-sh/pug/internal/app/migrate/clickhouse"
 	migratenats "github.com/pug-sh/pug/internal/app/migrate/nats"
