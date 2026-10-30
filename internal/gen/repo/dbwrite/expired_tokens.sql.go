@@ -5,7 +5,9 @@
 
 package dbwrite
 
-import "context"
+import (
+	"context"
+)
 
 const deleteExpiredEmailActionTokens = `-- name: DeleteExpiredEmailActionTokens :execrows
 delete from email_action_tokens
@@ -25,6 +27,8 @@ delete from refresh_tokens
 where expires_at <= now()
 `
 
+// Delete every expired token, including consumed and revoked rows. The expiry
+// timestamp is the retention boundary; status flags must not shorten it.
 func (q *Queries) DeleteExpiredRefreshTokens(ctx context.Context) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredRefreshTokens)
 	if err != nil {
