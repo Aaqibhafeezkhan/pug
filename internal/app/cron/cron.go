@@ -21,13 +21,12 @@ const (
 	LockPurge
 	LockBillingMeter
 	LockRetention
-	LockExpiredTokens
 
 	// Keep last: the count the test checks allLockKeys against.
 	lockKeyCount = iota
 )
 
-var allLockKeys = []LockKey{LockUsage, LockBillingReconcile, LockPurge, LockBillingMeter, LockRetention, LockExpiredTokens}
+var allLockKeys = []LockKey{LockUsage, LockBillingReconcile, LockPurge, LockBillingMeter, LockRetention}
 
 // Task is one unit of work inside a job, held to its own cadence through
 // cron_state. A named type rather than a bare string because a mistyped task is
@@ -52,5 +51,4 @@ var (
 	JobPurge            = Job{Key: LockPurge, Name: "purge"}
 	JobBillingMeter     = Job{Key: LockBillingMeter, Name: "billing_meter"}
 	JobRetention        = Job{Key: LockRetention, Name: "retention"}
-	JobExpiredTokens    = Job{Key: LockExpiredTokens, Name: "expired_tokens"}
 )

@@ -12,7 +12,6 @@ import (
 
 	purgecron "github.com/pug-sh/pug/internal/app/cron/purge"
 	retentioncron "github.com/pug-sh/pug/internal/app/cron/retention"
-	expiredtokenscron "github.com/pug-sh/pug/internal/app/cron/expiredtokens"
 	usagecron "github.com/pug-sh/pug/internal/app/cron/usage"
 	"github.com/pug-sh/pug/internal/app/migrate/clickhouse"
 	migratenats "github.com/pug-sh/pug/internal/app/migrate/nats"
@@ -219,12 +218,6 @@ var cronPurgeCmd = &cobra.Command{
 	Use:   "purge",
 	Short: "Run a pass erasing deleted projects",
 	Run:   run(purgecron.Run),
-}
-
-var cronExpiredTokensCmd = &cobra.Command{
-	Use:   "expired-tokens",
-	Short: "Delete expired refresh and email-action tokens",
-	Run:   run(expiredtokenscron.Run),
 }
 
 var cronRetentionCmd = &cobra.Command{
@@ -450,7 +443,6 @@ func init() {
 	cronCmd.AddCommand(cronUsageCmd)
 	cronCmd.AddCommand(cronPurgeCmd)
 	cronCmd.AddCommand(cronRetentionCmd)
-	cronCmd.AddCommand(cronExpiredTokensCmd)
 	rootCmd.AddCommand(cronCmd)
 
 	rootCmd.AddCommand(billingCmd)
