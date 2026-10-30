@@ -6,6 +6,10 @@ Detailed reference for the profiles subsystem (`internal/core/profiles`, `intern
 
 Profiles store properties as a single JSONB field (`properties`) rather than separate `auto_properties` and `custom_properties` fields. This simplifies the data model while preserving the ability to distinguish between auto-populated and custom properties at the application level through property naming conventions (e.g., `$` prefix for auto-properties).
 
+## SDK identify
+
+`ProfilesSDKService` (`internal/app/server/rpc/sdk/profiles`) has two write RPCs, `Identify` and `BatchIdentify`. Both strip a client-supplied `$ip` trait (counted by `profiles.identify_ip_stripped_total`) and publish one `ProfileIdentifyMessage` per identify to `nats.ProfileIdentifySubject`; the identify worker (`internal/app/workers/profiles/identify`) does the upsert and the anonymous merge. `BatchIdentify` carries at most 1000 `IdentifyRequest` items, each validated with `Identify`'s rules, so one invalid item fails the whole request. It publishes in order and stops at the first failure. A retried batch republishes the items before that failure, which the worker tolerates: a repeated anonymous merge finds the source already gone and carries on. sdk-go queues identifies and sends them this way, falling back to one `Identify` per item when a server answers `BatchIdentify` with `Unimplemented`.
+
 ## Profiles Read API
 
 `shared.profiles.v1.ProfilesService` is backed by ClickHouse for reads and PostgreSQL for delete-side effects.

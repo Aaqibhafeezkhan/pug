@@ -24,8 +24,12 @@ import (
 type spyJetStream struct {
 	jetstream.JetStream
 	mu         sync.Mutex
+	calls      int
 	published  []publishedMsg
 	publishErr error
+	// failOn, when set, fails only the publish with this 1-based call number,
+	// with publishErr or a generic error; other calls succeed.
+	failOn int
 }
 
 type publishedMsg struct {
@@ -34,11 +38,18 @@ type publishedMsg struct {
 }
 
 func (s *spyJetStream) Publish(_ context.Context, subject string, data []byte, _ ...jetstream.PublishOpt) (*jetstream.PubAck, error) {
-	if s.publishErr != nil {
-		return nil, s.publishErr
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.calls++
+	switch {
+	case s.failOn > 0 && s.calls == s.failOn:
+		if s.publishErr != nil {
+			return nil, s.publishErr
+		}
+		return nil, errors.New("publish failed")
+	case s.failOn == 0 && s.publishErr != nil:
+		return nil, s.publishErr
+	}
 	s.published = append(s.published, publishedMsg{Subject: subject, Data: data})
 	return &jetstream.PubAck{}, nil
 }
