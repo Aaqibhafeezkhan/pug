@@ -4,10 +4,15 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
+	"slices"
+	"strings"
 
 	"connectrpc.com/connect"
+	natsgo "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/pug-sh/pug/internal/app/server/rpc"
+	"github.com/pug-sh/pug/internal/apperr"
 	"github.com/pug-sh/pug/internal/deps/nats"
 	"github.com/pug-sh/pug/internal/deps/telemetry"
 	sdkprofilesv1 "github.com/pug-sh/pug/internal/gen/proto/sdk/profiles/v1"
@@ -17,7 +22,12 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// maxCoalescedBytes caps a merged identify so it still fits NATS's default 1 MiB
+// max_payload, with room left for the envelope and trace headers.
+const maxCoalescedBytes = 900 << 10
 
 var ipStrippedCounter metric.Int64Counter
 
@@ -25,7 +35,7 @@ func init() {
 	meter := otel.Meter("github.com/pug-sh/pug/internal/app/server/rpc/sdk/profiles")
 	ipStrippedCounter, _ = meter.Int64Counter(
 		"profiles.identify_ip_stripped_total",
-		metric.WithDescription("A $ip trait was stripped during Identify because the visitor IP must never be persisted. Our SDKs never send it, so a non-zero count means a hand-crafted client supplied an IP in traits."),
+		metric.WithDescription("A $ip trait was stripped during Identify or BatchIdentify because the visitor IP must never be persisted. Our SDKs never add it, so a non-zero count means a caller supplied an IP in traits."),
 	)
 }
 
@@ -49,40 +59,153 @@ func (s *Server) Identify(
 		return nil, err
 	}
 
+	if err := s.publishIdentify(ctx, principal.Project.ID, req.Msg); err != nil {
+		return nil, err
+	}
+
+	return connect.NewResponse(&sdkprofilesv1.IdentifyResponse{}), nil
+}
+
+// BatchIdentify merges what it can with coalesce, then publishes each message as
+// Identify publishes one, stopping at the first failure. It isn't atomic: a client
+// retrying the batch repeats whatever was already published.
+func (s *Server) BatchIdentify(
+	ctx context.Context,
+	req *connect.Request[sdkprofilesv1.BatchIdentifyRequest],
+) (*connect.Response[sdkprofilesv1.BatchIdentifyResponse], error) {
+	principal, err := rpc.MustGetPrincipalWithProject(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	items := req.Msg.GetIdentifies()
+	messages := coalesce(items)
+	for i, message := range messages {
+		if err := s.publishIdentify(ctx, principal.Project.ID, message); err != nil {
+			slog.WarnContext(ctx, "batch identify stopped partway",
+				slog.Int("published", i), slog.Int("messages", len(messages)), slog.Int("items", len(items)),
+				slog.String("project_id", principal.Project.ID))
+			return nil, err
+		}
+	}
+
+	return connect.NewResponse(&sdkprofilesv1.BatchIdentifyResponse{
+		// Items, not messages: fewer than sent would read as refused.
+		Accepted: proto.Uint32(uint32(len(items))),
+	}), nil
+}
+
+// coalesce merges each item that only sets traits into that user's latest message.
+// The identify worker runs concurrently, so separate messages for one user can apply
+// in either order; one message gives the result of applying them in order.
+//
+// Three kinds of item stay out of a merge. One carrying anonymous_id or device_id stays
+// where it is, because those act across users and moving it could change the outcome.
+// One that would take a message past maxCoalescedBytes starts a new message, which later
+// items join. One holding a NUL stays alone: the worker can't store it and fails the
+// whole message, so it must cost only itself.
+func coalesce(items []*sdkprofilesv1.IdentifyRequest) []*sdkprofilesv1.IdentifyRequest {
+	type latest struct {
+		message *sdkprofilesv1.IdentifyRequest
+		size    int
+	}
+	messages := make([]*sdkprofilesv1.IdentifyRequest, 0, len(items))
+	byUser := make(map[string]*latest, len(items))
+	for _, item := range items {
+		if traitsHaveNUL(item.GetTraits()) {
+			messages = append(messages, item)
+			continue
+		}
+		size := proto.Size(item)
+		onlySetsTraits := item.GetAnonymousId() == "" && item.GetDeviceId() == ""
+		last, seen := byUser[item.GetExternalId()]
+		if seen && onlySetsTraits && last.size+size <= maxCoalescedBytes {
+			mergeTraits(last.message, item)
+			last.size += size
+			continue
+		}
+		byUser[item.GetExternalId()] = &latest{message: item, size: size}
+		messages = append(messages, item)
+	}
+	return messages
+}
+
+// mergeTraits applies from's traits over into's, later values winning per top-level
+// key, as jsonb_shallow_merge does when the worker applies them.
+func mergeTraits(into, from *sdkprofilesv1.IdentifyRequest) {
+	if into.GetTraits().GetFields() == nil {
+		into.Traits = from.GetTraits()
+		return
+	}
+	maps.Copy(into.Traits.Fields, from.GetTraits().GetFields())
+}
+
+// traitsHaveNUL reports a NUL in any key or string, at any depth. It is Go rather than
+// a proto rule because CEL can't recurse into a Struct.
+func traitsHaveNUL(traits *structpb.Struct) bool {
+	for key, value := range traits.GetFields() {
+		if strings.ContainsRune(key, 0) || valueHasNUL(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func valueHasNUL(value *structpb.Value) bool {
+	switch kind := value.GetKind().(type) {
+	case *structpb.Value_StringValue:
+		return strings.ContainsRune(kind.StringValue, 0)
+	case *structpb.Value_StructValue:
+		return traitsHaveNUL(kind.StructValue)
+	case *structpb.Value_ListValue:
+		return slices.ContainsFunc(kind.ListValue.GetValues(), valueHasNUL)
+	}
+	return false
+}
+
+// publishIdentify strips a client-supplied $ip trait (counting it) and publishes
+// one ProfileIdentifyMessage for the identify worker. Its error is client-safe.
+func (s *Server) publishIdentify(ctx context.Context, projectID string, req *sdkprofilesv1.IdentifyRequest) error {
 	// The visitor IP is personal data and must never be persisted: strip the
 	// canonical $ip key from traits so an untrusted SDK caller cannot inject it
 	// into a profile's stored properties (mirrors the events enrichGeo strip),
-	// and count any occurrence. Scope is the canonical key our SDKs produce;
-	// arbitrary client data under other keys is never interpreted as an IP.
+	// and count any occurrence. Scope is the canonical key; arbitrary client
+	// data under other keys is never interpreted as an IP.
 	// delete on a nil Fields map (traits unset) is a safe no-op.
-	traits := req.Msg.GetTraits().GetFields()
+	traits := req.GetTraits().GetFields()
 	if _, ok := traits[geo.PropIP]; ok {
 		ipStrippedCounter.Add(ctx, 1)
 	}
 	delete(traits, geo.PropIP)
 
 	msg := &sdkprofilesv1.ProfileIdentifyMessage{
-		ExternalId:  proto.String(req.Msg.GetExternalId()),
-		Traits:      req.Msg.GetTraits(),
-		ProjectId:   proto.String(principal.Project.ID),
-		AnonymousId: proto.String(req.Msg.GetAnonymousId()),
-		DeviceId:    proto.String(req.Msg.GetDeviceId()),
+		ExternalId:  proto.String(req.GetExternalId()),
+		Traits:      req.GetTraits(),
+		ProjectId:   proto.String(projectID),
+		AnonymousId: proto.String(req.GetAnonymousId()),
+		DeviceId:    proto.String(req.GetDeviceId()),
 	}
 
 	data, err := proto.Marshal(msg)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to marshal identify message", slogx.Error(err),
-			slog.String("project_id", principal.Project.ID))
+			slog.String("project_id", projectID))
 		telemetry.RecordError(ctx, err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to process request"))
+		return connect.NewError(connect.CodeInternal, errors.New("failed to process request"))
 	}
 
 	if _, err = s.producer.Publish(ctx, nats.ProfileIdentifySubject, data); err != nil {
+		// No retry can publish this: answer with a code a client won't resend.
+		if errors.Is(err, natsgo.ErrMaxPayload) {
+			slog.WarnContext(ctx, "identify too large to publish", slog.Int("bytes", len(data)),
+				slog.String("project_id", projectID))
+			return apperr.Invalid(apperr.ReasonIdentifyTooLarge, "identify is too large")
+		}
 		slog.ErrorContext(ctx, "failed to publish identify message", slogx.Error(err),
-			slog.String("project_id", principal.Project.ID))
+			slog.String("project_id", projectID))
 		telemetry.RecordError(ctx, err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to process request"))
+		return connect.NewError(connect.CodeInternal, errors.New("failed to process request"))
 	}
 
-	return connect.NewResponse(&sdkprofilesv1.IdentifyResponse{}), nil
+	return nil
 }

@@ -6,4 +6,5 @@ var (
 	ReasonInvalidPageToken        = codes.add("INVALID_PAGE_TOKEN")
 	ReasonInvalidProfileFilter    = codes.add("INVALID_PROFILE_FILTER")
 	ReasonDeletionRequestNotFound = codes.add("DELETION_REQUEST_NOT_FOUND")
+	ReasonIdentifyTooLarge        = codes.add("IDENTIFY_TOO_LARGE")
 )
