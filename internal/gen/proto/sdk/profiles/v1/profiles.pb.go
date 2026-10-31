@@ -30,17 +30,17 @@ type IdentifyRequest struct {
 	// reserved-prefix rule on BatchCreateRequest.distinct_id already refuses them
 	// from clients. external_id needs the same guard because post-identify events
 	// are keyed by external_id, so an id accepted here comes back as a distinct_id
-	// that the batch rule then rejects — and because that rule is `all()`, one such
+	// that the batch rule then rejects, and because that rule is `all()`, one such
 	// user fails the WHOLE batch, taking unrelated users' events with it.
 	ExternalId *string `protobuf:"bytes,1,opt,name=external_id,json=externalId" json:"external_id,omitempty"`
-	// Profile properties — shallow-merged into existing properties. On key conflict,
+	// Profile properties, shallow-merged into existing properties. On key conflict,
 	// these values take precedence over previously stored values.
 	Traits *structpb.Struct `protobuf:"bytes,2,opt,name=traits" json:"traits,omitempty"`
 	// The SDK-generated anonymous ID. The SDK should send this on first identify
 	// to trigger merge-and-soft-delete of the anonymous profile. Must start with "anon-".
 	AnonymousId *string `protobuf:"bytes,3,opt,name=anonymous_id,json=anonymousId" json:"anonymous_id,omitempty"`
 	// The device to assign to this profile. The SDK should send this on first
-	// identify and on account switch (external_id changed) — not on every call,
+	// identify and on account switch (external_id changed), not on every call,
 	// to avoid unnecessary DB writes. Omit for web SDKs without push support.
 	DeviceId      *string `protobuf:"bytes,4,opt,name=device_id,json=deviceId" json:"device_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -141,6 +141,97 @@ func (*IdentifyResponse) Descriptor() ([]byte, []int) {
 	return file_sdk_profiles_v1_profiles_proto_rawDescGZIP(), []int{1}
 }
 
+type BatchIdentifyRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Each item is validated with IdentifyRequest's rules; one invalid item
+	// fails the whole request.
+	Identifies    []*IdentifyRequest `protobuf:"bytes,1,rep,name=identifies" json:"identifies,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BatchIdentifyRequest) Reset() {
+	*x = BatchIdentifyRequest{}
+	mi := &file_sdk_profiles_v1_profiles_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BatchIdentifyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BatchIdentifyRequest) ProtoMessage() {}
+
+func (x *BatchIdentifyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sdk_profiles_v1_profiles_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BatchIdentifyRequest.ProtoReflect.Descriptor instead.
+func (*BatchIdentifyRequest) Descriptor() ([]byte, []int) {
+	return file_sdk_profiles_v1_profiles_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *BatchIdentifyRequest) GetIdentifies() []*IdentifyRequest {
+	if x != nil {
+		return x.Identifies
+	}
+	return nil
+}
+
+type BatchIdentifyResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Identifies queued for the worker, not yet applied.
+	Accepted      *uint32 `protobuf:"varint,1,opt,name=accepted" json:"accepted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BatchIdentifyResponse) Reset() {
+	*x = BatchIdentifyResponse{}
+	mi := &file_sdk_profiles_v1_profiles_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BatchIdentifyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BatchIdentifyResponse) ProtoMessage() {}
+
+func (x *BatchIdentifyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sdk_profiles_v1_profiles_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BatchIdentifyResponse.ProtoReflect.Descriptor instead.
+func (*BatchIdentifyResponse) Descriptor() ([]byte, []int) {
+	return file_sdk_profiles_v1_profiles_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *BatchIdentifyResponse) GetAccepted() uint32 {
+	if x != nil && x.Accepted != nil {
+		return *x.Accepted
+	}
+	return 0
+}
+
 // ProfileIdentifyMessage is the internal NATS envelope for the identify worker.
 // project_id is injected server-side from the authenticated principal.
 type ProfileIdentifyMessage struct {
@@ -159,7 +250,7 @@ type ProfileIdentifyMessage struct {
 
 func (x *ProfileIdentifyMessage) Reset() {
 	*x = ProfileIdentifyMessage{}
-	mi := &file_sdk_profiles_v1_profiles_proto_msgTypes[2]
+	mi := &file_sdk_profiles_v1_profiles_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -171,7 +262,7 @@ func (x *ProfileIdentifyMessage) String() string {
 func (*ProfileIdentifyMessage) ProtoMessage() {}
 
 func (x *ProfileIdentifyMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_sdk_profiles_v1_profiles_proto_msgTypes[2]
+	mi := &file_sdk_profiles_v1_profiles_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -184,7 +275,7 @@ func (x *ProfileIdentifyMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProfileIdentifyMessage.ProtoReflect.Descriptor instead.
 func (*ProfileIdentifyMessage) Descriptor() ([]byte, []int) {
-	return file_sdk_profiles_v1_profiles_proto_rawDescGZIP(), []int{2}
+	return file_sdk_profiles_v1_profiles_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ProfileIdentifyMessage) GetExternalId() string {
@@ -226,15 +317,21 @@ var File_sdk_profiles_v1_profiles_proto protoreflect.FileDescriptor
 
 const file_sdk_profiles_v1_profiles_proto_rawDesc = "" +
 	"\n" +
-	"\x1esdk/profiles/v1/profiles.proto\x12\x0fsdk.profiles.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xd1\x02\n" +
-	"\x0fIdentifyRequest\x12\xae\x01\n" +
-	"\vexternal_id\x18\x01 \x01(\tB\x8c\x01\xbaH\x88\x01\xba\x01\x81\x01\n" +
-	"\x1bexternal_id.reserved_prefix\x12Aexternal_id must not start with the reserved 'cookieless-' prefix\x1a\x1f!this.startsWith('cookieless-')\xc8\x01\x01R\n" +
+	"\x1esdk/profiles/v1/profiles.proto\x12\x0fsdk.profiles.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xd5\x02\n" +
+	"\x0fIdentifyRequest\x12\xb2\x01\n" +
+	"\vexternal_id\x18\x01 \x01(\tB\x90\x01\xbaH\x8c\x01\xba\x01\x81\x01\n" +
+	"\x1bexternal_id.reserved_prefix\x12Aexternal_id must not start with the reserved 'cookieless-' prefix\x1a\x1f!this.startsWith('cookieless-')\xc8\x01\x01r\x02\x10\x01R\n" +
 	"externalId\x12/\n" +
 	"\x06traits\x18\x02 \x01(\v2\x17.google.protobuf.StructR\x06traits\x126\n" +
 	"\fanonymous_id\x18\x03 \x01(\tB\x13\xbaH\x10r\x0e\x18\xff\x012\t^$|^anon-R\vanonymousId\x12$\n" +
 	"\tdevice_id\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x18$R\bdeviceId\"\x12\n" +
-	"\x10IdentifyResponse\"\xe9\x02\n" +
+	"\x10IdentifyResponse\"c\n" +
+	"\x14BatchIdentifyRequest\x12K\n" +
+	"\n" +
+	"identifies\x18\x01 \x03(\v2 .sdk.profiles.v1.IdentifyRequestB\t\xbaH\x06\x92\x01\x03\x10\xe8\aR\n" +
+	"identifies\"3\n" +
+	"\x15BatchIdentifyResponse\x12\x1a\n" +
+	"\baccepted\x18\x01 \x01(\rR\baccepted\"\xe9\x02\n" +
 	"\x16ProfileIdentifyMessage\x12\xb2\x01\n" +
 	"\vexternal_id\x18\x01 \x01(\tB\x90\x01\xbaH\x8c\x01\xba\x01\x81\x01\n" +
 	"\x1bexternal_id.reserved_prefix\x12Aexternal_id must not start with the reserved 'cookieless-' prefix\x1a\x1f!this.startsWith('cookieless-')\xc8\x01\x01r\x02\x10\x01R\n" +
@@ -244,9 +341,10 @@ const file_sdk_profiles_v1_profiles_proto_rawDesc = "" +
 	"project_id\x18\x03 \x01(\tB\n" +
 	"\xbaH\a\xc8\x01\x01r\x02\x10\x01R\tprojectId\x12!\n" +
 	"\fanonymous_id\x18\x04 \x01(\tR\vanonymousId\x12\x1b\n" +
-	"\tdevice_id\x18\x05 \x01(\tR\bdeviceId2e\n" +
+	"\tdevice_id\x18\x05 \x01(\tR\bdeviceId2\xc5\x01\n" +
 	"\x12ProfilesSDKService\x12O\n" +
-	"\bIdentify\x12 .sdk.profiles.v1.IdentifyRequest\x1a!.sdk.profiles.v1.IdentifyResponseBHZFgithub.com/pug-sh/pug/internal/gen/proto/sdk/profiles/v1;sdkprofilesv1b\beditionsp\xe8\a"
+	"\bIdentify\x12 .sdk.profiles.v1.IdentifyRequest\x1a!.sdk.profiles.v1.IdentifyResponse\x12^\n" +
+	"\rBatchIdentify\x12%.sdk.profiles.v1.BatchIdentifyRequest\x1a&.sdk.profiles.v1.BatchIdentifyResponseBHZFgithub.com/pug-sh/pug/internal/gen/proto/sdk/profiles/v1;sdkprofilesv1b\beditionsp\xe8\a"
 
 var (
 	file_sdk_profiles_v1_profiles_proto_rawDescOnce sync.Once
@@ -260,23 +358,28 @@ func file_sdk_profiles_v1_profiles_proto_rawDescGZIP() []byte {
 	return file_sdk_profiles_v1_profiles_proto_rawDescData
 }
 
-var file_sdk_profiles_v1_profiles_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_sdk_profiles_v1_profiles_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_sdk_profiles_v1_profiles_proto_goTypes = []any{
 	(*IdentifyRequest)(nil),        // 0: sdk.profiles.v1.IdentifyRequest
 	(*IdentifyResponse)(nil),       // 1: sdk.profiles.v1.IdentifyResponse
-	(*ProfileIdentifyMessage)(nil), // 2: sdk.profiles.v1.ProfileIdentifyMessage
-	(*structpb.Struct)(nil),        // 3: google.protobuf.Struct
+	(*BatchIdentifyRequest)(nil),   // 2: sdk.profiles.v1.BatchIdentifyRequest
+	(*BatchIdentifyResponse)(nil),  // 3: sdk.profiles.v1.BatchIdentifyResponse
+	(*ProfileIdentifyMessage)(nil), // 4: sdk.profiles.v1.ProfileIdentifyMessage
+	(*structpb.Struct)(nil),        // 5: google.protobuf.Struct
 }
 var file_sdk_profiles_v1_profiles_proto_depIdxs = []int32{
-	3, // 0: sdk.profiles.v1.IdentifyRequest.traits:type_name -> google.protobuf.Struct
-	3, // 1: sdk.profiles.v1.ProfileIdentifyMessage.traits:type_name -> google.protobuf.Struct
-	0, // 2: sdk.profiles.v1.ProfilesSDKService.Identify:input_type -> sdk.profiles.v1.IdentifyRequest
-	1, // 3: sdk.profiles.v1.ProfilesSDKService.Identify:output_type -> sdk.profiles.v1.IdentifyResponse
-	3, // [3:4] is the sub-list for method output_type
-	2, // [2:3] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	5, // 0: sdk.profiles.v1.IdentifyRequest.traits:type_name -> google.protobuf.Struct
+	0, // 1: sdk.profiles.v1.BatchIdentifyRequest.identifies:type_name -> sdk.profiles.v1.IdentifyRequest
+	5, // 2: sdk.profiles.v1.ProfileIdentifyMessage.traits:type_name -> google.protobuf.Struct
+	0, // 3: sdk.profiles.v1.ProfilesSDKService.Identify:input_type -> sdk.profiles.v1.IdentifyRequest
+	2, // 4: sdk.profiles.v1.ProfilesSDKService.BatchIdentify:input_type -> sdk.profiles.v1.BatchIdentifyRequest
+	1, // 5: sdk.profiles.v1.ProfilesSDKService.Identify:output_type -> sdk.profiles.v1.IdentifyResponse
+	3, // 6: sdk.profiles.v1.ProfilesSDKService.BatchIdentify:output_type -> sdk.profiles.v1.BatchIdentifyResponse
+	5, // [5:7] is the sub-list for method output_type
+	3, // [3:5] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_sdk_profiles_v1_profiles_proto_init() }
@@ -290,7 +393,7 @@ func file_sdk_profiles_v1_profiles_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sdk_profiles_v1_profiles_proto_rawDesc), len(file_sdk_profiles_v1_profiles_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
