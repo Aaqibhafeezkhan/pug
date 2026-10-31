@@ -650,7 +650,6 @@ func (s *Service) issueSessionTx(ctx context.Context, w *dbwrite.Queries, custom
 // the given family, and returns the plaintext (shown to the client once). The
 // token is crypto-random for the same reason magic-link tokens are: it is the
 // sole secret needed to mint sessions.
-//
 func (s *Service) createRefreshToken(ctx context.Context, w *dbwrite.Queries, customerID, familyID, provenDomain string) (string, error) {
 	rawToken, err := newActionToken()
 	if err != nil {
