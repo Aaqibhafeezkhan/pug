@@ -91,10 +91,9 @@ const (
 
 	// maxInviteSendsPerWindow bounds the emails one invitation may produce in
 	// inviteSendWindow, counting the original send. A trailing window rather
-	// than a lifetime total because nothing can clear a spent lifetime cap: an
-	// expired invitation stays PENDING, the partial unique index blocks a fresh
-	// invite for the same (org, email), and there is no revoke RPC — so the
-	// address would be permanently uninvitable to that org.
+	// than a lifetime total because a spent lifetime cap would strand the
+	// invitation: an expired invitation stays PENDING, and the partial unique
+	// index blocks a fresh invite for the same (org, email) until it is revoked.
 	maxInviteSendsPerWindow = 10
 	inviteSendWindow        = 24 * time.Hour
 

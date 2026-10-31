@@ -359,6 +359,7 @@ var devCmd = &cobra.Command{
 		fmt.Println("  "+yellow+"Usage metering:"+reset, "not scheduled; run", cyan+"pug cron usage"+reset, "for one pass")
 		fmt.Println("  "+yellow+"Project purge:"+reset, "not scheduled; run", cyan+"pug cron purge"+reset, "for one pass")
 		fmt.Println("  "+yellow+"Retention:"+reset, "not scheduled; run", cyan+"pug cron retention"+reset, "for one pass")
+		fmt.Println("  "+yellow+"Expired tokens:"+reset, "not scheduled; run", cyan+"pug cron expired-tokens"+reset, "for one pass")
 		fmt.Println()
 
 		fmt.Println(green + "  Press Ctrl+C to stop" + reset)

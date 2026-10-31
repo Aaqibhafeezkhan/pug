@@ -48,17 +48,16 @@ func Run(ctx context.Context) error {
 
 	err = cron.WithLock(ctx, pgW, cron.JobExpiredTokens, func(ctx context.Context) error {
 		w := dbwrite.New(pgW)
-		refreshCount, err := w.DeleteExpiredRefreshTokens(ctx)
+		n, err := w.DeleteExpiredRefreshTokens(ctx)
 		if err != nil {
 			return fmt.Errorf("delete expired refresh tokens: %w", err)
 		}
-		emailCount, err := w.DeleteExpiredEmailActionTokens(ctx)
+		slog.InfoContext(ctx, "deleted expired refresh tokens", slog.Int64("refresh_tokens_deleted", n))
+		n, err = w.DeleteExpiredEmailActionTokens(ctx)
 		if err != nil {
 			return fmt.Errorf("delete expired email action tokens: %w", err)
 		}
-		slog.InfoContext(ctx, "expired token cleanup completed",
-			slog.Int64("refresh_tokens_deleted", refreshCount),
-			slog.Int64("email_action_tokens_deleted", emailCount))
+		slog.InfoContext(ctx, "deleted expired email action tokens", slog.Int64("email_action_tokens_deleted", n))
 		return nil
 	})
 	if errors.Is(err, cron.ErrLockHeld) {

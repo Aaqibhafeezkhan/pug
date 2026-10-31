@@ -14,6 +14,7 @@ delete from email_action_tokens
 where expires_at <= now()
 `
 
+// Used rows too, but never before expires_at: ResendInvite's cap counts them.
 func (q *Queries) DeleteExpiredEmailActionTokens(ctx context.Context) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredEmailActionTokens)
 	if err != nil {
@@ -27,8 +28,8 @@ delete from refresh_tokens
 where expires_at <= now()
 `
 
-// Delete every expired token, including consumed and revoked rows. The expiry
-// timestamp is the retention boundary; status flags must not shorten it.
+// Used and revoked rows too, but never before expires_at: a used row is what
+// catches a replayed token.
 func (q *Queries) DeleteExpiredRefreshTokens(ctx context.Context) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredRefreshTokens)
 	if err != nil {

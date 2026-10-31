@@ -80,11 +80,11 @@ const (
 	// from a claim.
 	//
 	// The number is therefore set by refresh cost, not leak risk. Every refresh
-	// is a FOR UPDATE-locked tx that inserts a row and rotates the token
-	// within its family, and racing rotations
-	// are what trip reuse-detection. 24h puts that at ~once per active user per
-	// day. Keep it far below refreshTokenTTL. Nothing enforces that ratio;
-	// service_test.go pins this constant's absolute value at ~24h.
+	// is a FOR UPDATE-locked tx that inserts a row and rotates the token within
+	// its family, and racing rotations are what trip reuse-detection. 24h puts
+	// that at ~once per active user per day. Keep it far below refreshTokenTTL.
+	// Nothing enforces that ratio; service_test.go pins this constant's absolute
+	// value at ~24h.
 	accessTokenTTL = 24 * time.Hour
 	// refreshTokenTTL is the sliding lifetime of a refresh token. Every refresh
 	// issues a fresh one, so a user active at least once per window stays signed
