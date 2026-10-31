@@ -1,9 +1,11 @@
 package expiredtokens
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/xid"
 
 	"github.com/pug-sh/pug/internal/app/cron"
@@ -28,35 +30,35 @@ func TestRunDeletesExpiredTokensRegardlessOfStatus(t *testing.T) {
 		t.Fatalf("CreateCustomer: %v", err)
 	}
 
-	_, err := pg.PgW.Exec(t.Context(), `
+	// The live used and revoked rows were marked 89 days ago and expire in an hour,
+	// so deleting them after any grace under 89 days fails here.
+	if _, err := pg.PgW.Exec(t.Context(), `
 		insert into refresh_tokens (id, customer_id, family_id, token_hash, expires_at, consumed_at, revoked_at)
-		values
-			($1, $2, $3, $4, now() - interval '1 hour', now(), null),
-			($5, $2, $6, $7, now() - interval '1 hour', null, now()),
-			($8, $2, $9, $10, now() + interval '1 hour', null, null),
-			($11, $2, $12, $13, now() + interval '1 hour', now(), null),
-			($14, $2, $15, $16, now() + interval '1 hour', null, now())`,
-		xid.New().String(), customerID, xid.New().String(), "expired-consumed-refresh",
-		xid.New().String(), xid.New().String(), "expired-revoked-refresh",
-		xid.New().String(), xid.New().String(), "live-active-refresh",
-		xid.New().String(), xid.New().String(), "live-consumed-refresh",
-		xid.New().String(), xid.New().String(), "live-revoked-refresh")
-	if err != nil {
+		select left(md5(token_hash), 20), $1, left(md5(token_hash), 20), token_hash, expires_at, consumed_at, revoked_at
+		from (values
+			('expired-active-refresh',   now() - interval '1 hour', null,                       null),
+			('expired-consumed-refresh', now() - interval '1 hour', now() - interval '89 days', null),
+			('expired-revoked-refresh',  now() - interval '1 hour', null,                       now() - interval '89 days'),
+			('live-active-refresh',      now() + interval '1 hour', null,                       null),
+			('live-consumed-refresh',    now() + interval '1 hour', now() - interval '89 days', null),
+			('live-revoked-refresh',     now() + interval '1 hour', null,                       now() - interval '89 days')
+		) as t(token_hash, expires_at, consumed_at, revoked_at)`,
+		customerID); err != nil {
 		t.Fatalf("seed refresh tokens: %v", err)
 	}
 
-	_, err = pg.PgW.Exec(t.Context(), `
+	// live-superseded-invite has the shape ResendInvite leaves behind: used, not yet expired.
+	if _, err := pg.PgW.Exec(t.Context(), `
 		insert into email_action_tokens (id, email, purpose, token_hash, expires_at, consumed_at)
-		values
-			($1, 'expired@example.com', 'magic_link', $2, now() - interval '1 hour', now()),
-			($3, 'expired@example.com', 'org_invite', $4, now() - interval '1 hour', null),
-			($5, 'live@example.com', 'magic_link', $6, now() + interval '1 hour', null),
-			($7, 'live@example.com', 'org_invite', $8, now() + interval '1 hour', null)`,
-		xid.New().String(), "expired-consumed-magic-link",
-		xid.New().String(), "expired-active-invite",
-		xid.New().String(), "live-magic-link",
-		xid.New().String(), "live-invite")
-	if err != nil {
+		select left(md5(token_hash), 20), 'someone@example.com', purpose, token_hash, expires_at, consumed_at
+		from (values
+			('expired-active-magic-link',   'magic_link', now() - interval '1 hour', null),
+			('expired-consumed-magic-link', 'magic_link', now() - interval '1 hour', now() - interval '2 hours'),
+			('expired-active-invite',       'org_invite', now() - interval '1 hour', null),
+			('live-magic-link',             'magic_link', now() + interval '1 hour', null),
+			('live-invite',                 'org_invite', now() + interval '6 days', null),
+			('live-superseded-invite',      'org_invite', now() + interval '6 days', now() - interval '23 hours')
+		) as t(token_hash, purpose, expires_at, consumed_at)`); err != nil {
 		t.Fatalf("seed email action tokens: %v", err)
 	}
 
@@ -65,49 +67,29 @@ func TestRunDeletesExpiredTokensRegardlessOfStatus(t *testing.T) {
 	}
 
 	var refreshHashes, emailHashes []string
-	rows, err := pg.PgRO.Query(t.Context(), "select token_hash from refresh_tokens order by token_hash")
-	if err != nil {
-		t.Fatalf("query refresh token hashes: %v", err)
+	if err := pg.PgRO.QueryRow(t.Context(),
+		"select array_agg(token_hash order by token_hash) from refresh_tokens").Scan(&refreshHashes); err != nil {
+		t.Fatalf("read refresh tokens: %v", err)
 	}
-	for rows.Next() {
-		var hash string
-		if err := rows.Scan(&hash); err != nil {
-			rows.Close()
-			t.Fatalf("scan refresh token hash: %v", err)
-		}
-		refreshHashes = append(refreshHashes, hash)
+	if err := pg.PgRO.QueryRow(t.Context(),
+		"select array_agg(token_hash order by token_hash) from email_action_tokens").Scan(&emailHashes); err != nil {
+		t.Fatalf("read email action tokens: %v", err)
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		t.Fatalf("iterate refresh token hashes: %v", err)
-	}
-	rows.Close()
-
-	rows, err = pg.PgRO.Query(t.Context(), "select token_hash from email_action_tokens order by token_hash")
-	if err != nil {
-		t.Fatalf("query email action token hashes: %v", err)
-	}
-	for rows.Next() {
-		var hash string
-		if err := rows.Scan(&hash); err != nil {
-			rows.Close()
-			t.Fatalf("scan email action token hash: %v", err)
-		}
-		emailHashes = append(emailHashes, hash)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		t.Fatalf("iterate email action token hashes: %v", err)
-	}
-	rows.Close()
 
 	wantRefreshHashes := []string{"live-active-refresh", "live-consumed-refresh", "live-revoked-refresh"}
 	if !slices.Equal(refreshHashes, wantRefreshHashes) {
 		t.Errorf("refresh token hashes = %v, want %v", refreshHashes, wantRefreshHashes)
 	}
-	wantEmailHashes := []string{"live-invite", "live-magic-link"}
+	wantEmailHashes := []string{"live-invite", "live-magic-link", "live-superseded-invite"}
 	if !slices.Equal(emailHashes, wantEmailHashes) {
 		t.Errorf("email action token hashes = %v, want %v", emailHashes, wantEmailHashes)
+	}
+}
+
+func TestRunFailsWithoutPostgres(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://pug@127.0.0.1:1/pug")
+	if err := Run(t.Context()); !errors.As(err, new(*pgconn.ConnectError)) {
+		t.Fatalf("Run = %v, want a Postgres connect error", err)
 	}
 }
 
