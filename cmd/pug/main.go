@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	expiredtokenscron "github.com/pug-sh/pug/internal/app/cron/expiredtokens"
 	purgecron "github.com/pug-sh/pug/internal/app/cron/purge"
 	retentioncron "github.com/pug-sh/pug/internal/app/cron/retention"
 	usagecron "github.com/pug-sh/pug/internal/app/cron/usage"
@@ -220,6 +221,13 @@ var cronPurgeCmd = &cobra.Command{
 	Run:   run(purgecron.Run),
 }
 
+var cronExpiredTokensCmd = &cobra.Command{
+	Use:   "expired-tokens",
+	Short: "Delete expired refresh and email-action tokens",
+	Args:  cobra.NoArgs,
+	Run:   run(expiredtokenscron.Run),
+}
+
 var cronRetentionCmd = &cobra.Command{
 	Use:   "retention",
 	Short: "Run a retention pass; with PUG_RETENTION_ENABLED off it only logs what it would delete",
@@ -351,6 +359,7 @@ var devCmd = &cobra.Command{
 		fmt.Println("  "+yellow+"Usage metering:"+reset, "not scheduled; run", cyan+"pug cron usage"+reset, "for one pass")
 		fmt.Println("  "+yellow+"Project purge:"+reset, "not scheduled; run", cyan+"pug cron purge"+reset, "for one pass")
 		fmt.Println("  "+yellow+"Retention:"+reset, "not scheduled; run", cyan+"pug cron retention"+reset, "for one pass")
+		fmt.Println("  "+yellow+"Expired tokens:"+reset, "not scheduled; run", cyan+"pug cron expired-tokens"+reset, "for one pass")
 		fmt.Println()
 
 		fmt.Println(green + "  Press Ctrl+C to stop" + reset)
@@ -443,6 +452,7 @@ func init() {
 	cronCmd.AddCommand(cronUsageCmd)
 	cronCmd.AddCommand(cronPurgeCmd)
 	cronCmd.AddCommand(cronRetentionCmd)
+	cronCmd.AddCommand(cronExpiredTokensCmd)
 	rootCmd.AddCommand(cronCmd)
 
 	rootCmd.AddCommand(billingCmd)
