@@ -75,8 +75,8 @@ func isDemoAccount(ctx context.Context) bool {
 // customer principal) it is a deliberate no-op for project-scoped RPCs (API-key
 // access stays coarse project scope, exactly as before Casbin), but an org-control-
 // plane RPC (OrgFromMessage) reached without a customer fails CLOSED (those services
-// are JWT-only, so this is a wiring backstop, not a live path). On the JWT path it
-// resolves the org per the entry's orgSource and checks (resource, action): a
+// are JWT-only, so this is a wiring backstop, not a live path). On a customer
+// principal (a JWT or an MCP token) it resolves the org per the entry's orgSource and checks (resource, action): a
 // non-member is denied ORG_NOT_A_MEMBER, an under-privileged member
 // ORG_ROLE_FORBIDDEN (both PermissionDenied).
 func authorizeRoleGated(
@@ -127,6 +127,11 @@ func resolveOrgID(req connect.AnyRequest, principal *Principal, src authzspec.Or
 		// A customer principal without a project cannot be authorized for a
 		// project-scoped RPC; mirror MustGetPrincipalWithProject's Unauthenticated.
 		if principal.Project == nil {
+			// A model reads this, and a /mcp tool call names its project in project_id.
+			if principal.AuthType == AuthTypeMCPToken {
+				return "", apperr.Unauthenticated(apperr.ReasonUnauthenticated,
+					"project_id is required: list_projects names the projects you can read")
+			}
 			return "", apperr.Unauthenticated(apperr.ReasonUnauthenticated, "unauthenticated")
 		}
 		return principal.Project.OrgID, nil

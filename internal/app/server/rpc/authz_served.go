@@ -8,6 +8,7 @@ import (
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/billing/v1/billingv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/customers/v1/customersv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/dashboards/v1/dashboardsv1connect"
+	"github.com/pug-sh/pug/internal/gen/proto/dashboard/mcpgrants/v1/mcpgrantsv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/orgemailproviders/v1/orgemailprovidersv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/orgs/v1/orgsv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/projects/v1/projectsv1connect"
@@ -19,6 +20,7 @@ import (
 	"github.com/pug-sh/pug/internal/gen/proto/shared/activity/v1/activityv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/shared/insights/v1/insightsv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/shared/profiles/v1/profilesv1connect"
+	"github.com/pug-sh/pug/internal/gen/proto/shared/projects/v1/sharedprojectsv1connect"
 )
 
 // servedServices lists every RPC service mounted by the server (see start() in
@@ -39,8 +41,10 @@ var servedServices = []struct {
 	{dashboardsv1connect.DashboardsServiceName, reflect.TypeFor[dashboardsv1connect.DashboardsServiceHandler]()},
 	{orgemailprovidersv1connect.OrgEmailProvidersServiceName, reflect.TypeFor[orgemailprovidersv1connect.OrgEmailProvidersServiceHandler]()},
 	{customersv1connect.CustomersServiceName, reflect.TypeFor[customersv1connect.CustomersServiceHandler]()},
+	{mcpgrantsv1connect.MCPGrantsServiceName, reflect.TypeFor[mcpgrantsv1connect.MCPGrantsServiceHandler]()},
 	{usagev1connect.UsageServiceName, reflect.TypeFor[usagev1connect.UsageServiceHandler]()},
 	{billingv1connect.BillingServiceName, reflect.TypeFor[billingv1connect.BillingServiceHandler]()},
+	{sharedprojectsv1connect.ProjectsServiceName, reflect.TypeFor[sharedprojectsv1connect.ProjectsServiceHandler]()},
 	{insightsv1connect.InsightsServiceName, reflect.TypeFor[insightsv1connect.InsightsServiceHandler]()},
 	{activityv1connect.ActivityServiceName, reflect.TypeFor[activityv1connect.ActivityServiceHandler]()},
 	{profilesv1connect.ProfilesServiceName, reflect.TypeFor[profilesv1connect.ProfilesServiceHandler]()},

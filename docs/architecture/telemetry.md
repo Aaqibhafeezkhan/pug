@@ -40,11 +40,11 @@ The mode is resolved once per process on the first `SetupSDK` call, so set the e
 
 | Set by | Tenant | Requests |
 | ------ | ------ | -------- |
-| `PrincipalInterceptor` | The authenticated project and its org | Project-scoped RPCs (`authzspec.Spec.IsProjectScoped`): API keys, and a JWT with `x-project-id` |
+| `PrincipalInterceptor` | The authenticated project and its org | Project-scoped RPCs (`authzspec.Spec.IsProjectScoped`): API keys, an MCP access token's tool call on the project it names, and a JWT with `x-project-id` |
 | `AuthzInterceptor` | The message's `org_id`, once authorized | Role-gated org RPCs |
 | The `OrgsService.Leave` handler | The org, once left | Leaving an org |
 | `GetSharedDashboard` | The share's project, without its org, once the share resolves | The public shared dashboard |
-| `loopbackClient.Do` | The API key's project and its org | The `/mcp` loopback's own logs |
+| `loopbackClient.Do` | The API key's project, and its org | The `/mcp` loopback's own logs on a key's call. A token's call names its project only once auth checks it, inside the chain. |
 
 The tenant is a pointer in context, so a value set deep in a request still reaches the access log. `rpc.HandlerOptions` is the one chain every handler uses. Its `PrincipalInterceptor` runs inside otel and before `validate`, so a project-scoped request that fails validation still names its project on the span and the access log; `TestHandlerOptions_rejectedRequestLogsTenant` pins that. Org RPCs, `Leave` and the share set the tenant only once authorized, so a request refused or rejected before then names none. An `x-project-id` sent to an RPC that is not project-scoped is not its tenant. A log call that passes `org_id` or `project_id` itself keeps its own value. One bound with `Logger.With` is not checked, but no code binds one. Sign-in RPCs name no tenant, even when they join an org or return the demo project: they act for a customer. The throttled cookieless degrade logs name none either, since each line stands for every tenant. Workers and cron jobs still add these attributes by hand.
 
@@ -61,7 +61,7 @@ Exceptions:
   - **`Build*Query` validation errors with client-supplied free-form input** (`BuildTrendsQuery`, `BuildSegmentationQuery`, `BuildFunnelTimingQuery`, `BuildFunnelCountsQuery`, `BuildRetentionQuery`, `BuildSegmentUsersQuery`): log at `slog.WarnContext` at the boundary. Other `Build*Query` callers in `internal/core/insights/service.go` (filter-schema and property-values builders) take only `projectID` plus a validated `eventKind`/`propertyKey`; their `Build()` failures are programmer-error / proto-enum drift, not client input, so they log + record at source like internal errors.
   - **Other client-input validators** vary based on whether the failure carries diagnostic value:
     - `events.ErrInvalidFilter`: log at `slog.WarnContext` at the boundary (carries which property/operator the client got wrong).
-    - `coreevents.ValidateExternalEvents`, `events.DecodeEventCursor`: no log at all at the boundary; the handler just translates to `CodeInvalidArgument`. The rejection itself is the diagnostic (malformed page tokens, batch-dedup mismatches), and the request body is already in the access log.
+    - `events.DecodeEventCursor`: no log at all at the boundary; the handler just translates to `CodeInvalidArgument`. The rejection itself is the diagnostic (malformed page tokens), and the request body is already in the access log.
 - **Defer-rollback / cleanup failures** (e.g. `tx.Rollback`, `rows.Close`) should pair slog + RecordError at the deferred site since no caller can see them.
 - **A cancel.** A canceled server request is not a server error, and new code needs no check for one. A context belongs to a request if it carries a correlation id. `rpc.WithCorrelationID` wraps the whole mux, auth included, and crons and workers never set one, so a job stopped by SIGTERM keeps its errors. Once a request's context is canceled:
   - `telemetry.RecordError` records nothing. It has to skip: a span's Error status cannot be lowered once the RPC answers CANCELED.

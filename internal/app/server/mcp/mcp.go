@@ -1,14 +1,15 @@
 // Package mcp mounts pug's read-only shared analytics API as a Model Context
 // Protocol (MCP) endpoint at /mcp. It is a thin adapter: every MCP tool call is
 // forwarded back through the server's own Connect stack in-process (see
-// loopbackClient), so validation, authentication and authorization run exactly
-// as they do for an external private-key API request. No business logic, auth or
-// validation is duplicated here.
+// loopbackClient), so validation, authentication and authorization run as for an
+// external API request, except that only the loopback admits an MCP access token.
+// No business logic, auth or validation is duplicated here. With OAuth on, it also
+// serves the token endpoint and the metadata clients discover it from (oauth.go).
 //
 // Tools are generated from the shared protos by protoc-gen-go-mcp (the *v1mcp
 // packages); this package selects the read-only subset, gives each a curated
-// name, and serves them over the official modelcontextprotocol/go-sdk streamable
-// HTTP transport in stateless mode.
+// name and title, and serves them over the official modelcontextprotocol/go-sdk
+// streamable HTTP transport in stateless mode.
 package mcp
 
 import (
@@ -21,8 +22,9 @@ import (
 	insightsv1mcp "github.com/pug-sh/pug/internal/gen/proto/shared/insights/v1/insightsv1mcp"
 	"github.com/pug-sh/pug/internal/gen/proto/shared/profiles/v1/profilesv1connect"
 	profilesv1mcp "github.com/pug-sh/pug/internal/gen/proto/shared/profiles/v1/profilesv1mcp"
+	"github.com/pug-sh/pug/internal/gen/proto/shared/projects/v1/sharedprojectsv1connect"
+	"github.com/pug-sh/pug/internal/gen/proto/shared/projects/v1/sharedprojectsv1mcp"
 	mcpruntime "github.com/redpanda-data/protoc-gen-go-mcp/pkg/runtime"
-	"github.com/redpanda-data/protoc-gen-go-mcp/pkg/runtime/gosdk"
 )
 
 const (
@@ -44,7 +46,10 @@ const (
 // Every exposed tool must be named here and no hidden one may be:
 // TestInstructionsMatchToolPolicy pins this against toolPolicy, since prose has no
 // compile-time link to the tool table.
-const instructions = `pug is a product-analytics platform. These tools are read-only and scoped to a single project (the one your private API key belongs to).
+const instructions = `pug is a product-analytics platform. These tools are read-only.
+
+Every tool but list_projects reads one project, named by its project_id argument:
+- list_projects lists the projects you can read, each with its org. Call it first, and pass the id of the project the question is about as project_id to every other tool. When more than one project could fit and the question doesn't say which, ask.
 
 Start by discovering what data exists:
 - get_insights_filter_schema (or get_activity_filter_schema) lists the event kinds and the property keys/types available to filter and break down by.
@@ -75,16 +80,16 @@ Time windows and granularity are arguments on the query tools; call the schema t
 //
 // Stateless is load-bearing, not a tuning knob: it makes the go-sdk build a fresh
 // session per HTTP request and thread that request's context into the tool
-// handler, which is how loopbackClient resolves the caller's own API key. In
+// handler, which is how loopbackClient resolves the caller's own credential. In
 // stateful mode the session context is captured once at initialize and reused for
-// every later call on that session, which would turn per-request key scoping into
-// a stale-credential bug.
+// every later call on that session, which would turn per-request credential
+// scoping into a stale-credential bug.
 func newHandler(loopback http.Handler) (http.Handler, error) {
 	raw := gomcp.NewServer(
 		&gomcp.Implementation{Name: serverName, Version: serverVersion},
 		&gomcp.ServerOptions{Instructions: instructions},
 	)
-	if err := registerRenamed(gosdk.Wrap(raw), func(srv mcpruntime.MCPServer) {
+	if err := registerRenamed(raw, func(srv mcpruntime.MCPServer) {
 		registerTools(srv, loopback)
 	}); err != nil {
 		return nil, err
@@ -96,6 +101,14 @@ func newHandler(loopback http.Handler) (http.Handler, error) {
 	), nil
 }
 
+// projectArg is the argument every tool but list_projects takes. The loopback sends
+// it on as x-project-id, where auth checks the credential reads that project.
+var projectArg = mcpruntime.ExtraProperty{
+	Name:        "project_id",
+	Description: "The id of the project to read, from list_projects.",
+	ContextKey:  projectIDKey{},
+}
+
 // registerTools forwards each read-only shared RPC to the MCP server through an
 // in-process loopback Connect client. srv is the rename-wrapping MCPServer, and
 // the one keepTool filter withholds every tool the policy table hides (the GDPR
@@ -104,11 +117,14 @@ func newHandler(loopback http.Handler) (http.Handler, error) {
 func registerTools(srv mcpruntime.MCPServer, loopback http.Handler) {
 	client := &loopbackClient{handler: loopback}
 	filter := mcpruntime.WithToolFilter(keepTool)
+	project := mcpruntime.WithExtraProperties(projectArg)
 
+	sharedprojectsv1mcp.ForwardToConnectProjectsServiceClient(srv,
+		sharedprojectsv1connect.NewProjectsServiceClient(client, loopbackBaseURL), filter)
 	insightsv1mcp.ForwardToConnectInsightsServiceClient(srv,
-		insightsv1connect.NewInsightsServiceClient(client, loopbackBaseURL), filter)
+		insightsv1connect.NewInsightsServiceClient(client, loopbackBaseURL), filter, project)
 	activityv1mcp.ForwardToConnectActivityServiceClient(srv,
-		activityv1connect.NewActivityServiceClient(client, loopbackBaseURL), filter)
+		activityv1connect.NewActivityServiceClient(client, loopbackBaseURL), filter, project)
 	profilesv1mcp.ForwardToConnectProfilesServiceClient(srv,
-		profilesv1connect.NewProfilesServiceClient(client, loopbackBaseURL), filter)
+		profilesv1connect.NewProfilesServiceClient(client, loopbackBaseURL), filter, project)
 }

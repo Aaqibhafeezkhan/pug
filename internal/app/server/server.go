@@ -17,6 +17,7 @@ import (
 	billingrpc "github.com/pug-sh/pug/internal/app/server/rpc/dashboard/billing"
 	"github.com/pug-sh/pug/internal/app/server/rpc/dashboard/customers"
 	dashboardsrpc "github.com/pug-sh/pug/internal/app/server/rpc/dashboard/dashboards"
+	mcpgrantsrpc "github.com/pug-sh/pug/internal/app/server/rpc/dashboard/mcpgrants"
 	"github.com/pug-sh/pug/internal/app/server/rpc/dashboard/orgemailproviders"
 	orgsrpc "github.com/pug-sh/pug/internal/app/server/rpc/dashboard/orgs"
 	"github.com/pug-sh/pug/internal/app/server/rpc/dashboard/projects"
@@ -28,6 +29,7 @@ import (
 	activityrpc "github.com/pug-sh/pug/internal/app/server/rpc/shared/activity"
 	"github.com/pug-sh/pug/internal/app/server/rpc/shared/insights"
 	sharedprofilesrpc "github.com/pug-sh/pug/internal/app/server/rpc/shared/profiles"
+	sharedprojectsrpc "github.com/pug-sh/pug/internal/app/server/rpc/shared/projects"
 	"github.com/pug-sh/pug/internal/app/server/webhook"
 	"github.com/pug-sh/pug/internal/cookieless"
 	"github.com/pug-sh/pug/internal/core/billing/entitlement"
@@ -43,6 +45,7 @@ import (
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/billing/v1/billingv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/customers/v1/customersv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/dashboards/v1/dashboardsv1connect"
+	"github.com/pug-sh/pug/internal/gen/proto/dashboard/mcpgrants/v1/mcpgrantsv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/orgemailproviders/v1/orgemailprovidersv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/orgs/v1/orgsv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/dashboard/projects/v1/projectsv1connect"
@@ -54,6 +57,7 @@ import (
 	"github.com/pug-sh/pug/internal/gen/proto/shared/activity/v1/activityv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/shared/insights/v1/insightsv1connect"
 	"github.com/pug-sh/pug/internal/gen/proto/shared/profiles/v1/profilesv1connect"
+	"github.com/pug-sh/pug/internal/gen/proto/shared/projects/v1/sharedprojectsv1connect"
 	"github.com/pug-sh/pug/internal/gen/repo/dbread"
 	"github.com/pug-sh/pug/internal/gen/repo/dbwrite"
 	"github.com/pug-sh/pug/internal/geo"
@@ -88,6 +92,10 @@ func start(ctx context.Context, d *deps) error {
 	if err != nil {
 		return err
 	}
+	mcpOAuth, err := newMCPOAuth(ctx, d.pgW)
+	if err != nil {
+		return err
+	}
 	warnStalledDeletions(ctx, queriesRo.HasStalledProjectDeletions)
 	orgsSvc := coreorgs.NewServiceWithRoleCache(d.pgRo, d.pgW, d.nats, d.redis.Unwrap()).WithSSOConnections(sso.cipher, sso.checkIssuer)
 	insightsExecutor := coreinsights.NewExecutor(d.ch)
@@ -97,7 +105,7 @@ func start(ctx context.Context, d *deps) error {
 
 	dashboardMW := authn.NewMiddleware(pogrpc.WithJWTAuth(d.jwtKey, queriesRo))
 	sdkMW := authn.NewMiddleware(pogrpc.WithSDKAuth(projectsRepo))
-	sharedMW := authn.NewMiddleware(pogrpc.WithDualAuth(d.jwtKey, queriesRo, projectsRepo))
+	sharedMW := authn.NewMiddleware(pogrpc.WithDualAuth(d.jwtKey, queriesRo, projectsRepo, mcpOAuth.Grants))
 
 	// Public
 	authServer, err := auth.NewServer(ctx, d.pgRo, d.pgW, d.jwtKey, d.nats, d.demoEnabled, sso.cipher, sso.client, turnstileVerifier)
@@ -129,6 +137,8 @@ func start(ctx context.Context, d *deps) error {
 
 	customersPath, customersHandler := customersv1connect.NewCustomersServiceHandler(
 		customers.NewServer(corecustomers.NewService(d.pgW)), handlerOpts)
+	mcpGrantsPath, mcpGrantsHandler := mcpgrantsv1connect.NewMCPGrantsServiceHandler(
+		mcpgrantsrpc.NewServer(mcpOAuth.Grants), handlerOpts)
 
 	// No ClickHouse: the server only reads what `pug cron usage` stored, and
 	// MeterWindow is the one method that needs it.
@@ -159,6 +169,8 @@ func start(ctx context.Context, d *deps) error {
 		billingrpc.NewServer(subscriptionSvc, meter.NewReader(dbread.New(d.pgW))), handlerOpts)
 
 	// Shared
+	sharedProjectsPath, sharedProjectsHandler := sharedprojectsv1connect.NewProjectsServiceHandler(
+		sharedprojectsrpc.NewServer(queriesRo, mcpOAuth.Grants), handlerOpts)
 	insightsPath, insightsHandler := insightsv1connect.NewInsightsServiceHandler(
 		insights.NewServer(insightsSvc, insightsExecutor), handlerOpts)
 	activityPath, activityHandler := activityv1connect.NewActivityServiceHandler(
@@ -206,10 +218,12 @@ func start(ctx context.Context, d *deps) error {
 	handle(dashboardsPath, pogrpc.WithCORS(ctx, d.corsOrigins, dashboardMW.Wrap(dashboardsHandler)))
 	handle(orgEmailProvidersPath, pogrpc.WithCORS(ctx, d.corsOrigins, dashboardMW.Wrap(orgEmailProvidersHandler)))
 	handle(customersPath, pogrpc.WithCORS(ctx, d.corsOrigins, dashboardMW.Wrap(customersHandler)))
+	handle(mcpGrantsPath, pogrpc.WithCORS(ctx, d.corsOrigins, dashboardMW.Wrap(mcpGrantsHandler)))
 	handle(usagePath, pogrpc.WithCORS(ctx, d.corsOrigins, dashboardMW.Wrap(usageHandler)))
 	handle(billingPath, pogrpc.WithCORS(ctx, d.corsOrigins, dashboardMW.Wrap(billingHandler)))
 
 	// Shared: Dashboard + private API key (CORS + dual auth)
+	handle(sharedProjectsPath, pogrpc.WithCORS(ctx, d.corsOrigins, sharedMW.Wrap(sharedProjectsHandler)))
 	handle(insightsPath, pogrpc.WithCORS(ctx, d.corsOrigins, sharedMW.Wrap(insightsHandler)))
 	handle(activityPath, pogrpc.WithCORS(ctx, d.corsOrigins, sharedMW.Wrap(activityHandler)))
 	handle(sharedProfilesPath, pogrpc.WithCORS(ctx, d.corsOrigins, sharedMW.Wrap(sharedProfilesHandler)))
@@ -234,12 +248,10 @@ func start(ctx context.Context, d *deps) error {
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
 
-	// mcp.Mount owns the whole endpoint, including its own private-key-only auth
-	// boundary built from projectsRepo, and replays each tool call through this same
-	// mux so validation, auth and authz run as they would for an external request.
-	// Mounted directly like reflection: not a Connect service, so the authz-registry
-	// contract does not apply.
-	if err := mcp.Mount(mux, mux, projectsRepo); err != nil {
+	// mcp.Mount owns /mcp: its auth boundary, the OAuth routes when on, and the
+	// loopback that replays tool calls through this mux. Mounted directly like
+	// reflection: not a Connect service, so the authz-registry contract does not apply.
+	if err := mcp.Mount(mux, mux, projectsRepo, mcpOAuth); err != nil {
 		return fmt.Errorf("mount mcp: %w", err)
 	}
 

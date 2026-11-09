@@ -237,6 +237,14 @@ func TestResolveOrgID(t *testing.T) {
 			t.Fatalf("code = %v, want Unauthenticated", apperrCode(err))
 		}
 	})
+	// A model reads the message, so it names the argument and the tool that fill it.
+	t.Run("orgFromProject without a project tells an MCP token why", func(t *testing.T) {
+		token := &Principal{AuthType: AuthTypeMCPToken, Customer: &dbread.Customer{ID: "cust-1"}, GrantID: "grant-1"}
+		_, err := resolveOrgID(emptyReq(), token, authzspec.OrgFromProject)
+		if apperrCode(err) != connect.CodeUnauthenticated || !strings.Contains(err.Error(), "project_id is required") {
+			t.Fatalf("err = %v, want Unauthenticated asking for project_id", err)
+		}
+	})
 	t.Run("orgFromMessage reads org_id off the message", func(t *testing.T) {
 		got, err := resolveOrgID(msgReq("org-9"), noProject, authzspec.OrgFromMessage)
 		if err != nil || got != "org-9" {
@@ -569,25 +577,30 @@ func TestAuthzInterceptorFailsClosedOnUnknownProcedure(t *testing.T) {
 // self-service write registered as SelfRead would otherwise skip that refusal.
 func TestSelfWriteRPCs(t *testing.T) {
 	selfWrite := map[string]bool{
-		"/public.auth.v1.AuthService/SignInWithEmail":          false,
-		"/public.auth.v1.AuthService/RequestMagicLink":         false,
-		"/public.auth.v1.AuthService/CompleteMagicLink":        false,
-		"/public.auth.v1.AuthService/CompleteOIDCSignIn":       false,
-		"/public.auth.v1.AuthService/GetAuthConfig":            false,
-		"/public.auth.v1.AuthService/RefreshSession":           false,
-		"/public.auth.v1.AuthService/SignOut":                  false,
-		"/public.auth.v1.AuthService/DiscoverSignIn":           false,
-		"/public.auth.v1.AuthService/DemoSignIn":               false,
-		"/public.dashboards.v1.SharedDashboardsService/Query":  false,
-		"/dashboard.orgs.v1.OrgsService/List":                  false,
-		"/dashboard.orgs.v1.OrgsService/Create":                true,
-		"/dashboard.orgs.v1.OrgsService/Leave":                 true,
-		"/dashboard.projects.v1.ProjectsService/Get":           false,
-		"/dashboard.customers.v1.CustomersService/GetMe":       false,
-		"/dashboard.customers.v1.CustomersService/SetPassword": true,
-		"/sdk.profiles.v1.ProfilesSDKService/Identify":         false,
-		"/sdk.profiles.v1.ProfilesSDKService/BatchIdentify":    false,
-		"/sdk.events.v1.EventsService/BatchCreate":             false,
+		"/public.auth.v1.AuthService/SignInWithEmail":                    false,
+		"/public.auth.v1.AuthService/RequestMagicLink":                   false,
+		"/public.auth.v1.AuthService/CompleteMagicLink":                  false,
+		"/public.auth.v1.AuthService/CompleteOIDCSignIn":                 false,
+		"/public.auth.v1.AuthService/GetAuthConfig":                      false,
+		"/public.auth.v1.AuthService/RefreshSession":                     false,
+		"/public.auth.v1.AuthService/SignOut":                            false,
+		"/public.auth.v1.AuthService/DiscoverSignIn":                     false,
+		"/public.auth.v1.AuthService/DemoSignIn":                         false,
+		"/public.dashboards.v1.SharedDashboardsService/Query":            false,
+		"/dashboard.orgs.v1.OrgsService/List":                            false,
+		"/dashboard.orgs.v1.OrgsService/Create":                          true,
+		"/dashboard.orgs.v1.OrgsService/Leave":                           true,
+		"/dashboard.projects.v1.ProjectsService/Get":                     false,
+		"/dashboard.customers.v1.CustomersService/GetMe":                 false,
+		"/dashboard.customers.v1.CustomersService/SetPassword":           true,
+		"/dashboard.mcpgrants.v1.MCPGrantsService/DescribeAuthorization": false,
+		"/dashboard.mcpgrants.v1.MCPGrantsService/ApproveAuthorization":  true,
+		"/dashboard.mcpgrants.v1.MCPGrantsService/ListGrants":            false,
+		"/dashboard.mcpgrants.v1.MCPGrantsService/RevokeGrant":           true,
+		"/shared.projects.v1.ProjectsService/List":                       false,
+		"/sdk.profiles.v1.ProfilesSDKService/Identify":                   false,
+		"/sdk.profiles.v1.ProfilesSDKService/BatchIdentify":              false,
+		"/sdk.events.v1.EventsService/BatchCreate":                       false,
 	}
 
 	for proc, want := range selfWrite {
